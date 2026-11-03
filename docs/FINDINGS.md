@@ -261,6 +261,12 @@ work/venv/bin/pip install unicorn capstone`). The same harness is the base for t
 
 ## Staged DNG builds (`tools/m8_dngpatch.py`)
 
+> **2026-11-03: builds are now made from pieces by flags** (`m8_dngpatch.py … dng --profiles
+> --dial-ev`, `BUILDS`, camera tests per piece in `TESTED_PIECES`); no new stage numbers. The stage
+> numbers below remain as history: diagnostic builds (1, 2, 3, 5, 6, 7, 11, 12) under `--stage N`, and
+> the regular builds' old numbers as aliases (4 = dng, 8 = dng --info, 10 = raw-menu --info, 13 = dng
+> --profiles, 14 = raw-menu --profiles, 15–20 = the --dial-ev builds). All hashes are unchanged.
+
 Each build = stock → P1–P3 (must equal flashed `f6589c41…`) → the stage's pieces; refused if any
 byte differs from the flashed build outside the pieces' declared regions (header 0x3CE48–0x3CF20,
 hook 0x3C6A8, ldimg 0x28AB0–0x29104, ext literal 0x3CFF8) or outside the PXA lump.

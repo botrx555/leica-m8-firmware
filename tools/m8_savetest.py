@@ -27,8 +27,10 @@ writes by the header block (0x3CE48-0x3CF20) same addresses as the flashed build
 trace identical to the flashed build, only the type-0 path reaches the header block,
 settings loader/menu unchanged (m8_emutest), declared-regions diff (m8_dngpatch).
 
-Usage:  work/venv/bin/python tools/m8_savetest.py [--stage N] [--quick] [-v]
-        (default: every built stage; --quick = one sample, one drain policy)
+Usage:  work/venv/bin/python tools/m8_savetest.py [--build raw-menu|dng [--info|--profiles] [--dial-ev]]
+                                                  [--stage N] [--quick] [-v]
+        (default: the 12 builds + the diagnostic builds 1, 2, 3, 5 (canary, idle, dump, .DNG names);
+        --stage N: a history / old stage number; --quick = one sample, one drain policy)
 """
 import hashlib, os, struct, sys, time
 from unicorn import UC_HOOK_MEM_WRITE, UC_MEM_WRITE
@@ -256,9 +258,8 @@ def trail_dest(idx):
     return DMA_BUF + (idx & 1) * DMA_PARITY + (ROWS - idx * 16) * ROW_BYTES - ROW_BYTES
 
 
-def expected(stage, raw, e, iso=None):
-    """The file each stage must produce from `raw`, computed without the firmware."""
-    pieces = dp.STAGES[stage][1]
+def expected(pieces, raw, e, iso=None):
+    """The file a build with these pieces must produce from `raw`, computed without the firmware."""
     out = bytearray(raw)
     if 'canary' in pieces:
         out[6] = 0xA5
@@ -335,9 +336,24 @@ def branches_into(pxa, lo, hi):
 def main():
     verbose = '-v' in sys.argv
     quick = '--quick' in sys.argv
-    stages = sorted(dp.STAGES)
+    # targets: (label, pieces, title)
+    targets = [(dp.build_name(*b), dp.build_pieces(*b), 'build ' + dp.build_name(*b)) for b in dp.BUILDS]
+    targets += [(f'stage{n}', dp.HISTORY[n][1], f'stage {n}: {dp.HISTORY[n][0]}') for n in (1, 2, 3, 5)]
     if '--stage' in sys.argv:
-        stages = [int(sys.argv[sys.argv.index('--stage') + 1])]
+        n = int(sys.argv[sys.argv.index('--stage') + 1])
+        targets = [(f'stage{n}', dp.stage_pieces(n), f'stage {n}')]
+    if '--build' in sys.argv:
+        i = sys.argv.index('--build') + 1
+        flags = []
+        while i < len(sys.argv) and sys.argv[i] in ('raw-menu', 'dng', '--info', '--profiles', '--dial-ev'):
+            flags.append(sys.argv[i])
+            i += 1
+        option = [f for f in flags if not f.startswith('--')]
+        screen = [f[2:] for f in flags if f in ('--info', '--profiles')]
+        if len(option) != 1 or len(screen) > 1:
+            raise SystemExit(__doc__)
+        b = (option[0], screen[0] if screen else None, '--dial-ev' in flags)
+        targets = [(dp.build_name(*b), dp.build_pieces(*b), 'build ' + dp.build_name(*b))]
     R = et.Results(verbose)
     stock_upd = open(os.path.join(ROOT, 'firmware/stock/m8-2_014.upd'), 'rb').read()
     stock = dp.pxa_of(stock_upd)
@@ -347,11 +363,11 @@ def main():
             hashlib.sha256(open(os.path.join(ROOT, 'firmware/patched/m8-2_014.upd'), 'rb').read())
             .hexdigest(), dp.FLASHED_SHA)
     builds = {'stock': stock, 'flashed': flashed}
-    for n in stages:
-        base, new = dp.stage_file(stock_upd, n)          # refuses on a region violation
-        builds[f'stage{n}'] = dp.pxa_of(new)
-        R.check(f'stage {n} declared regions vs flashed', dp.region_violations(
-            base, new, *dp.find_lump(new, b'PXA'), dp.stage_regions(n)), [])
+    for label, pieces, _ in targets:
+        base, new = dp.pieces_file(stock_upd, pieces)    # refuses on a region violation
+        builds[label] = dp.pxa_of(new)
+        R.check(f'{label} declared regions vs flashed', dp.region_violations(
+            base, new, *dp.find_lump(new, b'PXA'), dp.regions_of(pieces)), [])
     samples = SAMPLES[:1] if quick else SAMPLES
     policies = ['eager'] if quick else list(POLICIES)
     raws = {s: open(os.path.join(ROOT, s), 'rb').read() for s in samples}
@@ -389,12 +405,10 @@ def main():
             [hex(a) for a in branches_into(flashed, *NEW_CODE)], ['0x2dd48'])
     bia_ref = save(flashed, raws[samples[0]], 'eager', bia=True)
 
-    for n in stages:
-        b = f'stage{n}'
+    for b, pieces, title in targets:
         pxa = builds[b]
-        pieces = dp.STAGES[n][1]
         hooked = 'hook' in pieces
-        print(f'Stage {n}: {dp.STAGES[n][0]}')
+        print(title)
         R.check(f'{b} branches/pointers into the header block',
                 [hex(a) for a in branches_into(pxa, *HEADER)], ['0x3cd58'])
         R.check(f'{b} branches/pointers into the new code',
@@ -403,7 +417,7 @@ def main():
         for s, raw in raws.items():
             for pol in policies if s == samples[0] else ['eager']:
                 e = save(pxa, raw, pol)
-                out, want = bytes(e.writer.out), expected(n, raw, e)
+                out, want = bytes(e.writer.out), expected(pieces, raw, e)
                 diff = dp.changed_ranges(out, want) if len(out) == len(want) else 'size'
                 R.check(f'{b} {os.path.basename(s)} {pol:6s} file == expected '
                         f'({len(dp.changed_ranges(want, raw))} ranges differ from the camera file)', diff, [])
@@ -461,7 +475,7 @@ def main():
         if 'tiff' in pieces:
             raw = raws[samples[0]]
             e = save(pxa, raw, 'eager', iso=1250)
-            out, want = bytes(e.writer.out), expected(n, raw, e, iso=1250)
+            out, want = bytes(e.writer.out), expected(pieces, raw, e, iso=1250)
             R.check(f'{b} ISO 1250 shot == expected (BlackLevel 736)',
                     (dp.changed_ranges(out, want), e.new_entries, outside(e.new_writes, trail_dest(165),
                      trail_dest(165) + ROW_BYTES)), ([], 1, []))

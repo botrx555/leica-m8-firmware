@@ -3,35 +3,30 @@
 Personal reverse-engineering project on the author's own Leica M8 (running patched 2.014).
 Goal 1: make the service-mode "JPG fine+RAW" (14-bit) setting persist — DONE, patched 2.014 flashed and
 working on the camera (2026-10-19).
-Goal 2: have the camera write 14-bit DNG directly — DONE (2026-10-20). Chosen build: **stage 4**
-(`firmware/patched/m8-2_014-stage4.upd`, `55264b11…`, BlackLevel per ISO): JPG fine+RAW writes JPG + 14-bit DNG content
-named `.RAW`; Lightroom opens the `.RAW` as is. Stage 5 (`.DNG` names) worked in Lightroom but broke
-in-camera review (shows the DNG filename, can't reach the JPG), so it was rolled back.
-Rollback chain: stage 1 / `firmware/patched/m8-2_014.upd` / stock.
-Add-on (v0.4.0, 2026-10-23): **INFO in shooting mode shows Camera stats** (`m8patch.py … --info`):
-stage 8 = Option 2 + INFO (`32e6854e…`, on the author's camera), stage 10 = Option 1 + INFO
-(`fa4ae63a…`); both camera-tested (FINDINGS "GUI"). Roll back to stage 4. Without `--info` the options
-are unchanged. Owner's decision 2026-10-23: no histogram / image screens (PLAY has a histogram);
-INFO = Camera stats only; work paused there, waiting for user feedback.
-Tone-curve test (2026-10-23): **stage 11** = stage 8 + UP on Camera stats loads `\PROFILE.LUT`
-(made by `tools/m8_profile.py`) as the Blackfin's GAMMA until power-off (`f0192047…`); camera-tested:
-the next JPG uses the curve (`luttests/`). Roll back to stage 8.
-Stage 12 (MODERN built in as the default, `5af5aa1c…`) was flashed and worked, then rolled back
-2026-10-27. **Owner's decision: stock curves stay the camera's default; JPGs change only when the user
-loads a profile.** **Stage 13** = stage 8 + picture-profile picker (INFO → Camera stats; UP → list of
-`\PROFILES\*.LUT`, UP/DOWN choose, SET loads until power-off; `d7a17ef2…`, **flashed and camera-tested
-2026-10-27**, on the author's camera). Roll back to stage 8. **Stage 14** = Option 1 + the same picker
-(`e170f449…`, camera-tested 2026-10-27 per the owner).
-Add-on in test (2026-10-31): **rear dial sets exposure compensation** (Leica's own dormant ⅓ EV step,
-shown on the rear screen, closes after 2 s or on any key): stages 15 / 16 / 17 / 18 = stage 13 / 14 /
-8 / 10 + ev pieces, 19 / 20 = stage 4 / Option 1 + ev pieces (FINDINGS "Exposure compensation on the
-rear dial"). **Stage 15 flashed and camera-tested 2026-11-02** (value kept after power-off, EXIF bias
-+1 EV) — current build on the author's camera; roll back to stage 13.
-**v0.6.0 (2026-11-02): add-ons combine** (`--info`|`--profiles`, `--dial-ev`, either option = 12 builds).
-**Owner's decision 2026-11-02: a combination may ship when every piece is camera-tested** (pieces:
-RAW patch, DNG = stage 4, info = stage 8, profiles = stage 13, dial = stage 15), pieces byte-identical
-to those builds and regions disjoint — checked by `tools/m8_combotest.py`; m8patch.TESTED marks each
-build "exact" (that file flashed) or "pieces". A new or changed piece still needs its own camera test.
+Goal 2: have the camera write 14-bit DNG directly — DONE (2026-10-20): Option 2 (`dng`, `55264b11…`,
+BlackLevel per ISO): JPG fine+RAW writes JPG + 14-bit DNG content named `.RAW`; Lightroom opens it as
+is. `.DNG` names (old stage 5) broke in-camera review, so the files stay `.RAW`.
+
+**Builds = option + add-ons (since 2026-11-03; no more stage numbers).** Pieces, each camera-tested
+(`m8_dngpatch.TESTED_PIECES`, the flashed build and date):
+- `raw-menu` (Option 1, RAW patch, `f6589c41…`, 2026-10-19); `dng` (Option 2, `55264b11…`, 2026-10-21);
+- `--info`: INFO in shooting mode shows Camera stats (`32e6854e…`, 2026-10-23);
+- `--profiles`: Camera stats + picture-profile picker, UP → `\PROFILES\*.LUT`, SET loads until
+  power-off (`d7a17ef2…`, 2026-10-27);
+- `--dial-ev`: rear dial sets exposure compensation (Leica's dormant ⅓ EV step, shown on the rear
+  screen, closes after 2 s or any key; `1254b743…` = `dng --profiles --dial-ev`, 2026-11-02).
+12 builds (`m8_dngpatch.BUILDS`); **owner's decision 2026-11-02: a build may ship when every piece is
+camera-tested**, pieces byte-identical to those builds and regions disjoint (`tools/m8_combotest.py`).
+A new or changed piece needs its own camera test. **Author's camera: `dng --profiles --dial-ev`
+(`1254b743…`); roll back to `dng --profiles` (`d7a17ef2…`).**
+Owner's decisions: no histogram / image screens (PLAY has one); INFO = Camera stats (an M10-style
+overview was built and rejected 2026-11-03); stock tone curves stay the default (a built-in MODERN
+curve, old stage 12, was flashed and rolled back 2026-10-27).
+History: builds used to be numbered stages. Diagnostic / one-off builds keep their numbers
+(`m8_dngpatch.HISTORY`, `--stage N`: 1 canary, 2 idle, 3 dump, 5 .DNG names, 6 INFO → Body Debug Data,
+7 histogram screens, 11 `\PROFILE.LUT` test, 12 MODERN default); old numbers of builds are aliases
+(`OLD_NUMBERS`: 4 dng, 8 dng --info, 10 raw-menu --info, 13 dng --profiles, 14 raw-menu --profiles,
+15-20 the --dial-ev builds) so FINDINGS and old hashes still resolve. Don't add new numbers.
 
 Read `docs/FINDINGS.md` first — it holds every address, offset, hash and conclusion so far.
 For Goal 2, read `docs/DNG_PLAN.md` — the agreed approach, tag list, constraints, firmware leads and step-by-step work plan.
@@ -40,7 +35,7 @@ For Goal 2, read `docs/DNG_PLAN.md` — the agreed approach, tag list, constrain
 - `firmware/stock/` — untouched Leica .upd files. Never modify; verify SHA-256 against FINDINGS.
 - `firmware/patched/` — generated by `tools/m8_rawpatch.py`. Regenerate rather than hand-edit.
 - `m8patch.py` — user front end: `python3 m8patch.py raw-menu|dng stock.upd [--info|--profiles] [--dial-ev] [--out-dir DIR]`
-  → `build/` (Option 1 = RAW patch, Option 2 = stage 4; add-on combinations = stages 8/10/13-20, map in `STAGE`).
+  → `build/` (builds via `m8_dngpatch.build_file(stock, option, screen, dial)`).
   Writes only results matching `TESTED` (12 hashes, each "exact" or "pieces" camera-tested; `PENDING` =
   built but refused until camera-tested); never overwrites. `m8patch.py profiles stock.upd X.ncp|dir|modern …
   [--base srgb|modern|leica]` → `build/PROFILES/NAME.LUT` + `LEICA.LUT` (via tools/m8_profile.py).
@@ -48,20 +43,22 @@ For Goal 2, read `docs/DNG_PLAN.md` — the agreed approach, tag list, constrain
 - `tools/armtools.py` — Capstone helpers (dis, xrefs, callers); defaults to `work/split-2.014/PXA.bin`
 - `tools/m8_rawpatch.py` — `python3 tools/m8_rawpatch.py firmware/stock/m8-2_014.upd firmware/patched/m8-2_014.upd`
 - `tools/m8_emutest.py` — Unicorn test of the RAW patch (~1 s): `work/venv/bin/python tools/m8_emutest.py [-v]`
-- `tools/m8_dngpatch.py` — staged DNG builds: `work/venv/bin/python tools/m8_dngpatch.py firmware/stock/m8-2_014.upd firmware/patched/m8-2_014-stageN.upd --stage N`
-- `tools/m8_infotest.py` — INFO builds (stages 6-8, 10) vs stage 4 / Option 1: real key handler, all keys and GUI states (~10 s):
+- `tools/m8_dngpatch.py` — builds from pieces, with region / original-byte checks and disassembly of every change:
+  `work/venv/bin/python tools/m8_dngpatch.py firmware/stock/m8-2_014.upd OUT.upd raw-menu|dng [--info|--profiles] [--dial-ev]`
+  (or `--stage N` for a HISTORY / old number)
+- `tools/m8_infotest.py` — INFO builds (old numbers 6-8, 10, 11, 13, 14) vs `dng` / Option 1: real key handler, all keys and GUI states (~10 s):
   `work/venv/bin/python tools/m8_infotest.py [-v]`
-- `tools/m8_inforender.py` — INFO screens (stage 8; `--stage 7`/`10`/`11`/`13`): runs the real GUI paint code, writes PNGs + checks (~2 s):
+- `tools/m8_inforender.py` — INFO screens (old number 8 = `dng --info`; `--stage 7`/`10`/`11`/`13`/`14`): runs the real GUI paint code, writes PNGs + checks (~2 s):
   `work/venv/bin/python tools/m8_inforender.py [image.JPG] [--stage 7|8|10] [--out DIR] [-v]`
 - `tools/asm/` — assembly sources of the new code (`m8_header.s`, `m8_dnghook.s`, `m8_info.s`, `m8_infoscreens.s`, `m8_infostats.s`, `m8_infoprofile.s`, `m8_infopicker.s`, `m8_infoev.s`); `tools/m8_asm.py X.s`
   assembles one and prints bytes + SHA-256 (the patch script carries the frozen bytes).
-- `tools/m8_combotest.py` — all 12 m8patch builds: hash, == stage file, each piece byte-identical to its
+- `tools/m8_combotest.py` — all 12 m8patch builds: hash, == build_file, each piece byte-identical to its
   camera-tested build, changes only in the pieces' regions (~5 s): `work/venv/bin/python tools/m8_combotest.py`
-- `tools/m8_evtest.py` — dial EV builds (stages 15-20) vs their base builds: key handler (all keys, 12 GUI states),
+- `tools/m8_evtest.py` — every `--dial-ev` build vs the same build without it: key handler (all keys, 12 GUI states),
   page keys, timer, Leica's EV step run for real, paint PNGs `work/ev-*.png` (~30 s): `work/venv/bin/python tools/m8_evtest.py [-v]`
-- `tools/m8_savetest.py` — emulated RAW save path, tests every built stage against the camera samples
-  (M4 Max: ~9 min all stages, ~3.5 min `--quick`, ~2.5 min `--stage N`):
-  `work/venv/bin/python tools/m8_savetest.py [--stage N] [--quick] [-v]`
+- `tools/m8_savetest.py` — emulated RAW save path, tests the 12 builds + diagnostic builds 1/2/3/5 against the camera
+  samples (M4 Max: ~12 min all, ~5 min `--quick`, ~2.5 min one build):
+  `work/venv/bin/python tools/m8_savetest.py [--build dng --profiles --dial-ev | --stage N] [--quick] [-v]`
 - `tools/m8_reclaim.py` — ranks debug-command handlers as reclaimable space: `work/venv/bin/python tools/m8_reclaim.py`
 - `tools/m8_font.py` — decodes the GUI fonts, renders text or a glyph sheet (read-only):
   `work/venv/bin/python tools/m8_font.py work/split-2.014/GUI_FONT1.bin text "ISO 640" out.png`
@@ -94,8 +91,8 @@ For Goal 2, read `docs/DNG_PLAN.md` — the agreed approach, tag list, constrain
   - New code never writes flash or EEPROM and never calls settings-save, flash or update routines.
     It only writes inside the image DMA buffer (bounds-checked in the code; skip the write if out of
     range) and its own stack; the emulator test fails on any other write.
-  - Each build may differ from the current flashed build only in the declared regions (header code,
-    last-block branch, reclaimed `ldimg` space, extension string); checked automatically.
+  - Each build may differ from Option 1 only in its pieces' declared regions; checked automatically.
+    New features are new pieces (flags), never new stage numbers.
   - New code stays out of startup. Before each flash, confirm the boot/update code is byte-identical
     and unreachable from the changed regions (done for stage 4, FINDINGS "Staged DNG builds").
     Stage 2 (hook off, idle test) is optional since 2026-10-20 (owner's decision): its reclaimed

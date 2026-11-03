@@ -376,19 +376,18 @@ Every address, offset and decision, with the evidence for it, is in
 
 - `tools/m8_rawpatch.py` builds Option 1. `--no-menu` keeps the hidden button sequence for
   selecting RAW but still makes the choice stick.
-- `tools/m8_dngpatch.py --stage N` builds the staged DNG builds; Option 2 is stage 4. The others are
-  kept for diagnosis: 1 = header canary, 2 = new code present but not hooked in, 3 = metadata dump,
-  5 = `.DNG` names. It prints every changed instruction and checks that nothing outside the
-  declared regions changed.
-- Add-ons: stages 8 / 10 = Option 2 / Option 1 + `--info`; 13 / 14 = + `--profiles`; 15–20 = the
-  same with `--dial-ev` (15 = Option 2 + `--profiles --dial-ev`, 16 = Option 1 + `--profiles
-  --dial-ev`, 17 / 18 = `--info --dial-ev`, 19 / 20 = `--dial-ev` alone). Stages 6 (INFO opens the
-  service page), 7 (an INFO histogram, dropped), 11 and 12 (tone-curve tests) are kept as history.
-  See `docs/FINDINGS.md`, "GUI" and "Exposure compensation on the rear dial".
+- `tools/m8_dngpatch.py` builds any combination from its pieces, with the same flags as `m8patch.py`
+  (`… OUT.upd dng --profiles --dial-ev`). It prints every changed instruction and checks that nothing
+  outside the pieces' declared regions changed. Each piece's camera test is recorded in
+  `TESTED_PIECES`.
+- Builds used to be numbered "stages". The diagnostic builds keep their numbers (`--stage N`): 1 =
+  header canary, 2 = new code present but not hooked in, 3 = metadata dump, 5 = `.DNG` names, plus
+  6, 7, 11, 12 (early INFO and tone-curve experiments). The old numbers of the regular builds (4, 8,
+  10, 13–20) still work as aliases, so the notes in `docs/FINDINGS.md` resolve.
 
 ```sh
 python3 -m venv work/venv && work/venv/bin/pip install -r requirements.txt   # Capstone, Unicorn, …
-work/venv/bin/python tools/m8_dngpatch.py firmware/stock/m8-2_014.upd firmware/patched/m8-2_014-stage4.upd --stage 4
+work/venv/bin/python tools/m8_dngpatch.py firmware/stock/m8-2_014.upd work/dng.upd dng
 ```
 
 ## Testing without a camera
@@ -397,8 +396,8 @@ Unicorn-based emulator suites run the real firmware code from the stock file:
 
 ```sh
 work/venv/bin/python tools/m8_emutest.py              # settings loader + SET menu, stock vs RAW patch
-work/venv/bin/python tools/m8_savetest.py --stage 4   # a simulated shot through the real save path, Option 2
-work/venv/bin/python tools/m8_savetest.py             # the same for every stage
+work/venv/bin/python tools/m8_savetest.py --build dng   # a simulated shot through the real save path, Option 2
+work/venv/bin/python tools/m8_savetest.py               # the same for every build
 ```
 
 How long they take (Apple M4 Max; expect longer on slower machines). Each prints `N passed, 0 failed`
@@ -407,9 +406,9 @@ at the end and prints little before that, so a long silence is normal.
 | Command | What it covers | Time |
 |---|---|---|
 | `m8_emutest.py` | Option 1: settings loader and SET menu | ~1 s |
-| `m8_savetest.py --stage 4` | Option 2: one build through the save path | ~2.5 min |
-| `m8_savetest.py --quick` | every stage, fewer variants per sample | ~3.5 min |
-| `m8_savetest.py` | every stage, all variants | ~9 min |
+| `m8_savetest.py --build dng` | Option 2: one build through the save path | ~2.5 min |
+| `m8_savetest.py --quick` | all 12 builds + the diagnostic builds, fewer variants per sample | ~5 min |
+| `m8_savetest.py` | all 12 builds + the diagnostic builds, all variants | ~12 min |
 | `m8_infotest.py` | `--info` / `--profiles` builds: key handling, every key in every GUI state | ~10 s |
 | `m8_inforender.py` | `--info` / `--profiles` screens: rendered with the camera's drawing code (PNG) | ~2 s |
 | `m8_evtest.py` | `--dial-ev` builds: key handling in every GUI state, close timer, Leica's EV step, screen | ~40 s |
@@ -431,7 +430,7 @@ names. `m8_emutest.py` needs the RAW-patch build at `firmware/patched/m8-2_014.u
 | `m8patch.py` | Build Option 1 or Option 2 with any add-ons from your stock file, make profile files (start here) |
 | `CHANGELOG.md` | Versions of this project, with the build hash of each option |
 | `tools/m8_rawpatch.py` | Persistent-RAW patch (2.014) |
-| `tools/m8_dngpatch.py` | Staged builds (`--stage 1…20`: DNG 1–5, add-ons 6–20), with region and hash checks |
+| `tools/m8_dngpatch.py` | Builds from pieces (same flags as `m8patch.py`; diagnostic builds via `--stage N`), with region and hash checks |
 | `tools/asm/` | Assembly source of the new code (DNG: `m8_header.s`, `m8_dnghook.s`; INFO and dial: `m8_info*.s`) |
 | `tools/m8_profile.py`, `tools/ncp.py`, `tools/m8_curvesim.py` | Picture profiles: .LUT builder, Nikon .NCP reader, curve preview |
 | `tools/m8_asm.py` | Assembles one source with clang and checks it against the frozen bytes |

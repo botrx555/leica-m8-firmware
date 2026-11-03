@@ -1,34 +1,28 @@
 #!/usr/bin/env python3
 """
-Leica M8 firmware 2.014 -- in-camera 14-bit DNG, staged builds (docs/DNG_PLAN.md §8 step 5).
+Leica M8 firmware 2.014 -- patched builds from pieces (in-camera 14-bit DNG, INFO screen, picture
+profiles, dial EV).
 
 Every build starts from the stock file, applies the persistent-RAW patch (P1-P3 from
-m8_rawpatch.py; the result must be the flashed build f6589c41...), then the pieces of one
-stage. Stages are not cumulative: each is a complete build, one flash per stage.
+m8_rawpatch.py; the result must be Option 1, the flashed build f6589c41...), then its pieces:
 
-  Stage  Pieces                          Proves                                Status
-  1      canary                          we control file contents              camera-tested 2026-10-20
-  2      canary, ldimg                   idle test: nothing else runs ldimg    emulator-tested
-  3      canary, ldimg (dump), hook      metadata offsets, from the camera     emulator-tested
-  4      tiff, ldimg, hook               first in-camera 14-bit DNG (.RAW)     emulator-tested
-  5      tiff, ldimg, hook, ext          files named .DNG                      emulator-tested
-  6      stage 4 + info, info key        INFO opens Body Debug Data            camera-tested 2026-10-23
-  7      stage 4 + screens, screens key  INFO screens: histogram, stats        camera-tested 2026-10-23:
-                                         histogram stayed on the first shot; replaced by stage 8
-  8      stage 4 + stats, stats key      INFO shows Camera stats               camera-tested 2026-10-23
-  10     stats, stats key (no DNG)       Option 1 + INFO Camera stats          camera-tested 2026-10-23
-  11     stage 4 + profile, profile key  UP on Camera stats loads \\PROFILE.LUT   camera-tested 2026-10-23
-  12     stage 11 + modern curve         MODERN tone curve as the default        flashed 2026-10-27; rolled back
-                                         (owner's decision: stock curves stay the default)
-  13     stage 4 + picker, picker key    INFO: Camera stats + profile picker     camera-tested 2026-10-27
-  14     picker, picker key (no DNG)     Option 1 + Camera stats + profile picker camera-tested 2026-10-27
-  15     stage 13 + ev pieces        Rear dial sets exposure compensation  camera-tested 2026-11-02
-  16     stage 14 + ev pieces        Option 1 + picker + dial EV           emulator-tested
-  17     stage 8 + ev pieces         Option 2 + Camera stats + dial EV     emulator-tested
-  18     stage 10 + ev pieces        Option 1 + Camera stats + dial EV     emulator-tested
-  19     stage 4 + ev pieces         Option 2 + dial EV                    emulator-tested (pieces camera-tested)
-  20     ev pieces (no DNG)          Option 1 + dial EV                    emulator-tested (pieces camera-tested)
-         (ev pieces = ev, ev key, ev held, ev timer)
+  option   raw-menu (Option 1: nothing more) or dng (Option 2: tiff, ldimg, hook)
+  screen   none, --info (stats, stats key) or --profiles (picker, picker key; includes Camera stats)
+  dial     --dial-ev (ev, ev key, ev held, ev timer)
+
+That is 12 builds (BUILDS). Each piece has been tested on a camera (TESTED_PIECES: the flashed
+build and date); a build may ship when all its pieces are camera-tested (owner's decision
+2026-11-02; tools/m8_combotest.py checks every build carries each piece byte for byte as tested).
+
+History (no new numbers are added): builds used to be numbered "stages". Diagnostic and one-off
+builds keep their numbers (HISTORY, `--stage N`):
+  1 canary (camera-tested 2026-10-20), 2 idle test, 3 metadata dump, 5 files named .DNG (flashed,
+  rolled back: in-camera review), 6 INFO opens Body Debug Data, 7 INFO histogram screens (replaced),
+  11 UP loads \\PROFILE.LUT (test), 12 MODERN curve built in (rolled back).
+The other old numbers are aliases of builds (OLD_NUMBERS): 4 = dng, 8 = dng --info, 10 = raw-menu
+--info, 13 = dng --profiles, 14 = raw-menu --profiles, 15 = dng --profiles --dial-ev, 16 =
+raw-menu --profiles --dial-ev, 17 = dng --info --dial-ev, 18 = raw-menu --info --dial-ev, 19 = dng
+--dial-ev, 20 = raw-menu --dial-ev. FINDINGS and KNOWN_OUTPUTS refer to them.
 
 Pieces (each in one declared region, REGIONS):
   canary  0x3CEA0 mov r0,#7 -> #0xA5: RAW header u16[3] = 0xA5
@@ -71,13 +65,14 @@ Safety checks run on every build (the build is refused if one fails):
   - input is the stock 2.014 file (SHA-256), base equals the flashed build;
   - each piece finds the expected original bytes (or their SHA-256 for long regions);
   - the output differs from the flashed build only inside the PXA lump, and there only in
-    the regions the stage's pieces declare; every other lump is byte-identical;
+    the regions the build's pieces declare; every other lump is byte-identical;
   - every changed instruction is printed as Capstone disassembly at its real address.
 
-Test before flashing: work/venv/bin/python tools/m8_savetest.py --stage N
+Test before flashing: work/venv/bin/python tools/m8_savetest.py --build dng --profiles (any build's flags)
 Copy the output to the card as M8-2_014.UPD (the updater looks for M8.UPD / M8-x_yyy.UPD).
 
-Usage: python3 m8_dngpatch.py firmware/stock/m8-2_014.upd firmware/patched/m8-2_014-stageN.upd --stage N
+Usage: python3 m8_dngpatch.py stock.upd out.upd raw-menu|dng [--info | --profiles] [--dial-ev]
+       python3 m8_dngpatch.py stock.upd out.upd --stage N      (HISTORY or OLD_NUMBERS)
 Needs: capstone (work/venv)
 """
 import hashlib, os, struct, sys
@@ -539,38 +534,60 @@ def pieces():
     }
 
 
-# stage -> (title, pieces)
-STAGES = {
+# Diagnostic and one-off builds, kept under their old stage numbers: number -> (title, pieces)
+HISTORY = {
     1: ('canary: RAW header u16[3] 7 -> 0xA5', ['canary']),
     2: ('dng_hook + template in ldimg, hook off (idle test); canary kept', ['canary', 'ldimg']),
     3: ('hook on, job metadata dump into the trailing row; canary kept', ['canary', 'ldimg (dump)', 'hook']),
-    4: ('hook on, TIFF header + IFD template: 14-bit DNG content, still named .RAW', ['tiff', 'ldimg', 'hook']),
-    5: ('as stage 4, files named .DNG', ['tiff', 'ldimg', 'hook', 'ext']),
-    6: ('as stage 4, plus INFO in shooting mode opens Body Debug Data', ['tiff', 'ldimg', 'hook', 'info', 'info key']),
-    7: ('as stage 4, plus INFO screens: Last shot (histogram), Camera stats',
+    5: ('as dng, files named .DNG', ['tiff', 'ldimg', 'hook', 'ext']),
+    6: ('as dng, plus INFO in shooting mode opens Body Debug Data', ['tiff', 'ldimg', 'hook', 'info', 'info key']),
+    7: ('as dng, plus INFO screens: Last shot (histogram), Camera stats',
         ['tiff', 'ldimg', 'hook', 'screens', 'screens key']),
-    8: ('as stage 4, plus INFO shows Camera stats', ['tiff', 'ldimg', 'hook', 'stats', 'stats key']),
-    10: ('Option 1 (RAW patch only, no DNG) plus INFO shows Camera stats', ['stats', 'stats key']),
-    11: ('as stage 8, plus UP on Camera stats loads \\PROFILE.LUT as the JPG tone curve (test)',
+    11: ('as dng --info, plus UP on Camera stats loads \\PROFILE.LUT as the JPG tone curve (test)',
          ['tiff', 'ldimg', 'hook', 'profile', 'profile key']),
     12: ('as stage 11, plus the MODERN tone curve built in as the default (LUTS GAMMA curves)',
          ['tiff', 'ldimg', 'hook', 'profile', 'profile key', 'modern curve']),
-    13: ('as stage 8, plus a picture-profile picker: UP/DOWN lists \\PROFILES\\*.LUT, SET loads one',
-         ['tiff', 'ldimg', 'hook', 'picker', 'picker key']),
-    14: ('Option 1 (RAW patch only, no DNG) plus Camera stats + picture-profile picker', ['picker', 'picker key']),
-    15: ('as stage 13, plus exposure compensation on the rear dial',
-         ['tiff', 'ldimg', 'hook', 'picker', 'picker key', 'ev', 'ev key', 'ev held', 'ev timer']),
-    16: ('as stage 14, plus exposure compensation on the rear dial',
-         ['picker', 'picker key', 'ev', 'ev key', 'ev held', 'ev timer']),
-    17: ('as stage 8, plus exposure compensation on the rear dial',
-         ['tiff', 'ldimg', 'hook', 'stats', 'stats key', 'ev', 'ev key', 'ev held', 'ev timer']),
-    18: ('as stage 10, plus exposure compensation on the rear dial', ['stats', 'stats key', 'ev', 'ev key', 'ev held', 'ev timer']),
-    19: ('as stage 4, plus exposure compensation on the rear dial',
-         ['tiff', 'ldimg', 'hook', 'ev', 'ev key', 'ev held', 'ev timer']),
-    20: ('Option 1 (RAW patch only, no DNG) plus exposure compensation on the rear dial',
-         ['ev', 'ev key', 'ev held', 'ev timer']),
 }
+OPTION_PIECES = {'raw-menu': [], 'dng': ['tiff', 'ldimg', 'hook']}
+SCREEN_PIECES = {None: [], 'info': ['stats', 'stats key'], 'profiles': ['picker', 'picker key']}
+DIAL_PIECES = ['ev', 'ev key', 'ev held', 'ev timer']
+BUILDS = [(o, sc, dl) for o in ('raw-menu', 'dng') for sc in (None, 'info', 'profiles') for dl in (False, True)]
+# piece -> (pieces, flashed build it was camera-tested in, date)
+TESTED_PIECES = {
+    'raw-menu': ([], 'f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396', '2026-10-19'),
+    'dng': (OPTION_PIECES['dng'], '55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c', '2026-10-21'),
+    'info': (SCREEN_PIECES['info'], '32e6854ec0bc451667ef4f8f6b40dfb4c8af406a43db84e94b90abeb380408f8', '2026-10-23'),
+    'profiles': (SCREEN_PIECES['profiles'], 'd7a17ef25309af7780f24bc2bf240bfd8e68cb6e4edb6aa0845e07524d273b14',
+                 '2026-10-27'),
+    'dial': (DIAL_PIECES, '1254b7430a492c9197f2c4bb812bdd9a11e7d3b6a97fb043f245274b4fa07dfa', '2026-11-02'),
+}
+OLD_NUMBERS = {4: ('dng', None, False), 8: ('dng', 'info', False), 10: ('raw-menu', 'info', False),
+               13: ('dng', 'profiles', False), 14: ('raw-menu', 'profiles', False),
+               15: ('dng', 'profiles', True), 16: ('raw-menu', 'profiles', True),
+               17: ('dng', 'info', True), 18: ('raw-menu', 'info', True),
+               19: ('dng', None, True), 20: ('raw-menu', None, True)}
+
+
+def build_pieces(option, screen=None, dial=False):
+    return OPTION_PIECES[option] + SCREEN_PIECES[screen] + (DIAL_PIECES if dial else [])
+
+
+def build_name(option, screen=None, dial=False):
+    return option + (f' --{screen}' if screen else '') + (' --dial-ev' if dial else '')
+
+
+def stage_pieces(stage):
+    """Pieces of a HISTORY build or of an old stage number."""
+    if stage in OLD_NUMBERS:
+        return build_pieces(*OLD_NUMBERS[stage])
+    if stage in HISTORY:
+        return HISTORY[stage][1]
+    raise SystemExit(f'no stage {stage} (old numbers: {sorted(HISTORY) + sorted(OLD_NUMBERS)})')
+
+
 KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
+    'f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396':
+        'Option 1 (raw-menu: RAW patch only), m8_emutest; flashed and camera-tested 2026-10-19',
     '3f84b34a225aeebe3f5f18cb658d4b14028d49d98e1fd1d1366ccf25a5830e66':
         'stage 1, m8_savetest 32/0; flashed and camera-tested 2026-10-20',
     '3b451b4d7da62621179995ba11fa5962f347c7aa9d82e99a9e156e7801ee6e25':
@@ -648,9 +665,8 @@ def modern_curves(buf):
 FILE_PIECES = {'modern curve': (GAMMA_CURVES_STOCK_SHA, modern_curves)}
 
 
-def stage_regions(stage):
+def regions_of(names):
     p = pieces()
-    names = STAGES[stage][1]
     return {p[n][0] for n in names if n in p} | {'gamma' for n in names if n in FILE_PIECES}
 
 
@@ -677,20 +693,28 @@ def flashed_file(stock):
 
 
 def stage_file(stock, stage):
-    """Stock .upd bytes -> (flashed build, stage build), region check passed."""
-    if stage not in STAGES:
-        raise SystemExit(f'no stage {stage}')
+    """Stock .upd bytes -> (Option 1, build) for a HISTORY number or an old stage number."""
+    return pieces_file(stock, stage_pieces(stage))
+
+
+def build_file(stock, option, screen=None, dial=False):
+    """Stock .upd bytes -> (Option 1, build) from the build's flags; region check passed."""
+    return pieces_file(stock, build_pieces(option, screen, dial))
+
+
+def pieces_file(stock, all_names):
+    """Stock .upd bytes -> (Option 1, Option 1 + these pieces), region check passed."""
     p = pieces()
-    names = [n for n in STAGES[stage][1] if n not in FILE_PIECES]
+    names = [n for n in all_names if n not in FILE_PIECES]
     regions = [p[n][0] for n in names]
     if len(set(regions)) != len(regions):
-        raise SystemExit(f'stage {stage}: two pieces in one region')
+        raise SystemExit(f'{all_names}: two pieces in one region')
     base = flashed_file(stock)
     buf = bytearray(base)
     pos, size = find_lump(buf, b'PXA')
     _apply(buf, pos, [(n, *p[n][1:]) for n in names])
     spans = []
-    for n in STAGES[stage][1]:
+    for n in all_names:
         if n in FILE_PIECES:
             old_sha, make = FILE_PIECES[n]
             lo, hi = gamma_curves_span(buf)
@@ -775,23 +799,36 @@ def show(base, new):
 
 
 def main():
-    args = [a for a in sys.argv[1:]]
-    if '--stage' not in args or len(args) != 4:
+    args = sys.argv[1:]
+    if '--stage' in args:
+        i = args.index('--stage')
+        stage = int(args[i + 1])
+        del args[i:i + 2]
+        names = stage_pieces(stage)
+        title = (f'stage {stage}: {HISTORY[stage][0]}' if stage in HISTORY
+                 else f'old stage {stage} = {build_name(*OLD_NUMBERS[stage])}')
+    else:
+        dial = '--dial-ev' in args
+        screens = [a[2:] for a in args if a in ('--info', '--profiles')]
+        args = [a for a in args if a not in ('--dial-ev', '--info', '--profiles')]
+        if len(screens) > 1 or len(args) != 3 or args[2] not in OPTION_PIECES:
+            raise SystemExit(__doc__)
+        screen = screens[0] if screens else None
+        option = args.pop()
+        names = build_pieces(option, screen, dial)
+        title = 'build ' + build_name(option, screen, dial)
+    if len(args) != 2:
         raise SystemExit(__doc__)
-    i = args.index('--stage')
-    stage = int(args[i + 1])
-    del args[i:i + 2]
     src, dst = args
-    if stage not in STAGES:
-        raise SystemExit(f'no stage {stage}')
-    print(f'stage {stage}: {STAGES[stage][0]}')
-    base, new = stage_file(open(src, 'rb').read(), stage)
-    print('base: flashed persistent-RAW build', FLASHED_SHA[:8], '; pieces:', ', '.join(STAGES[stage][1]))
+    print(title)
+    base, new = pieces_file(open(src, 'rb').read(), names)
+    print('base: Option 1 (flashed persistent-RAW build)', FLASHED_SHA[:8], '; pieces:', ', '.join(names) or 'none')
     show(base, new)
+    regions = regions_of(names)
     n = sum(e - s for s, e in changed_ranges(base, new))
-    print(f'differs from the flashed build in {n} byte(s), all inside declared regions '
-          f'{sorted(stage_regions(stage))}; other lumps identical'
-          + (' (LUTS: only the 15 GAMMA tone curves changed)' if 'gamma' in stage_regions(stage) else ''))
+    print(f'differs from Option 1 in {n} byte(s), all inside declared regions '
+          f'{sorted(regions)}; other lumps identical'
+          + (' (LUTS: only the 15 GAMMA tone curves changed)' if 'gamma' in regions else ''))
     open(dst, 'wb').write(new)
     sha = hashlib.sha256(new).hexdigest()
     print('wrote', dst, 'sha256', sha)

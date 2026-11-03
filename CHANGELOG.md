@@ -3,6 +3,15 @@
 Versions of this project (not Leica firmware versions). Every build is for Leica M8 firmware **2.014**.
 Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't flash it.
 
+## Unreleased
+
+- Developers: builds are made from pieces with the same flags as `m8patch.py`
+  (`tools/m8_dngpatch.py … dng --profiles --dial-ev`), and each piece's camera test is recorded
+  (`TESTED_PIECES`). The numbered "stages" are kept only as history: the diagnostic builds under
+  `--stage N`, the old numbers of regular builds as aliases. `m8_savetest.py --build …` tests one
+  build; by default it tests all 12 plus the diagnostic builds. Every build's bytes and hash are
+  unchanged.
+
 ## v0.6.0 — 2026-11-02
 
 - **New add-on, `--dial-ev`, for either option:** in shooting mode the rear dial sets exposure

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Emulator test of exposure compensation on the rear dial (tools/asm/m8_infoev.s; m8_dngpatch.py
---stage 15 / 16 / 17 / 18 / 19 / 20 = stage 13 / 14 / 8 / 10 / 4 / Option 1 + the pieces ev, ev key,
-ev held, ev timer).
+Emulator test of exposure compensation on the rear dial (tools/asm/m8_infoev.s): every m8_dngpatch
+build with --dial-ev (pieces ev, ev key, ev held, ev timer) against the same build without it.
 
   1. Key path: the camera's real application key handler 0x44E30 (+ service gate 0x403F0 + the
      INFO code + ev_key) on each EV build and on its base build, every key code in every GUI state
@@ -46,8 +45,8 @@ from m8_rawpatch import PXA_BASE
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 SRC = os.path.join(ROOT, 'tools/asm/m8_infoev.s')
 LO, HI = d.REGIONS['setting']
-EV_BUILDS = {15: (13, 'bfmem'), 16: (14, 'bfmem'), 17: (8, 'memtest12'), 18: (10, 'memtest12'),
-             19: (4, 'memtest12'), 20: (None, 'memtest12')}    # None = Option 1 (RAW patch only)
+# every build with --dial-ev vs the same build without it; the screen code region the key handler runs
+SCREEN_REGION = {None: 'memtest12', 'info': 'memtest12', 'profiles': 'bfmem'}
 SETTINGS = 0x14C910                 # the settings block's address on the camera ([0xD4230])
 APP = it.APP
 DIALOG = APP + 0x70A4
@@ -190,7 +189,7 @@ def main():
     res.check('entry addresses in the patch script match the source',
               (d.EV_KEY_ENTRY, d.EV_TIMER_ENTRY), (LO + sym['ev_key'], LO + sym['ev_timer']))
     vt_words = list(struct.unpack('<22I', d.EV_CODE[sym['vt_ev']:sym['vt_ev'] + 88]))
-    p4 = d.pxa_of(d.stage_file(stock, 4)[1])
+    p4 = d.pxa_of(d.build_file(stock, 'dng')[1])
     leica_vt = list(struct.unpack_from('<22I', p4, DLG_VT - PXA_BASE))
     res.check('vt_ev = the dialog\'s own table except keys / title / content',
               [i for i in range(22) if vt_words[i] != leica_vt[i]], [11, 18, 19])
@@ -199,16 +198,19 @@ def main():
               ('call', 'timer_stop', 'app+0x2534C', '0x0')]
     unknown = set()
     pxas = {}
-    for n, (base_n, region) in EV_BUILDS.items():
-        base, sn = d.stage_file(stock, n)
-        sb = base if base_n is None else d.stage_file(stock, base_n)[1]
-        base_n = base_n or 'Option 1'
+    for option, screen, dial in d.BUILDS:
+        if not dial:
+            continue
+        region = SCREEN_REGION[screen]
+        n, base_n = d.build_name(option, screen, True), d.build_name(option, screen, False)
+        _, sn = d.build_file(stock, option, screen, True)
+        _, sb = d.build_file(stock, option, screen, False)
         pn, pb = d.pxa_of(sn), d.pxa_of(sb)
-        pxas[n] = pn
+        pxas[option, screen] = pn
         pos, size = d.find_lump(sn, b'PXA')
-        res.check(f'stage {n} vs stage {base_n}: changes only in setting + evkey + evheld + evtimer',
+        res.check(f'{n} vs {base_n}: changes only in setting + evkey + evheld + evtimer',
                   d.region_violations(sb, sn, pos, size, {'setting', 'evkey', 'evheld', 'evtimer'}), [])
-        res.check(f'stage {n}: references into the new code', it.refs_into(pn, LO, HI),
+        res.check(f'{n}: references into the new code', it.refs_into(pn, LO, HI),
                   ['word 0x2DF2C = 0x2C44C', 'branch 0x44E9C', 'branch 0x44EDC',
                    f'word 0xEF2B4 = 0x{d.EV_TIMER_ENTRY:X}'])
         for state in STATES:
@@ -218,10 +220,10 @@ def main():
                 if tb != tn:
                     diffs.append((key, tb, tn))
             if state not in OPEN_STATES:
-                res.check(f'stage {n}, {state}: identical to stage {base_n} for all 256 keys',
+                res.check(f'{n}, {state}: identical to {base_n} for all 256 keys',
                           [chr(k) for k, _, _ in diffs], [])
                 continue
-            res.check(f'stage {n}, {state}: only the dial keys differ', [chr(k) for k, _, _ in diffs], ['c', 'w'])
+            res.check(f'{n}, {state}: only the dial keys differ', [chr(k) for k, _, _ in diffs], ['c', 'w'])
             for key, tb, tn in diffs:
                 k = len(tb) - 1                         # the base build's trace, without its return
                 step = tn[k] if len(tn) > k and tn[k][:2] == ('call', 'ev_step') else None
@@ -232,12 +234,12 @@ def main():
                                   ('write', 'app+0x70A4', 4, vt_ev),
                                   ('call', 'show', 'app+0x70A4', '0x1'),
                                   ('call', 'arm', 'app+0x7104', 0x271E, 2000, 1, 0, 0, 0)]
-                res.check(f'stage {n}, {state}, `{chr(key)}`: base build makes no call or write for it',
+                res.check(f'{n}, {state}, `{chr(key)}`: base build makes no call or write for it',
                           [x for x in tb[:-1] if x[0] == 'write' or x[1] not in ('dance_tracker', 'f_41788', 'timer_stop')], [])
-                res.check(f'stage {n}, {state}, `{chr(key)}`: as base, then step, open as INFO does, arm the timer',
+                res.check(f'{n}, {state}, `{chr(key)}`: as base, then step, open as INFO does, arm the timer',
                           (tn[:-1], tn[-1] == tb[-1]), (want, True))
 
-    pxa = pxas[15]
+    pxa = pxas['dng', 'profiles']             # the camera-tested build (old stage 15)
     # ---- 2. keys while the page is open
     bad = []
     for key in range(256):

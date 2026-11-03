@@ -44,7 +44,7 @@ import hashlib, os, sys
 VERSION = '0.6.0'                   # project version (CHANGELOG.md), not a Leica firmware version
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, 'tools'))
-from m8_rawpatch import KNOWN_INPUTS, PATCHES as RAW_PATCHES, find_lump
+from m8_rawpatch import KNOWN_INPUTS
 import m8_dngpatch
 
 # Status texts: the exact file was flashed and used on a camera, or only its pieces were.
@@ -79,14 +79,6 @@ TESTED = {
 }
 # Built, waiting for a camera test of a new piece: refused until then.
 PENDING = {}
-STAGE = {  # (option, screen add-on, dial) -> m8_dngpatch stage; None = the RAW patch alone
-    ('raw-menu', None, False): None, ('dng', None, False): 4,
-    ('dng', 'info', False): 8, ('raw-menu', 'info', False): 10,
-    ('dng', 'profiles', False): 13, ('raw-menu', 'profiles', False): 14,
-    ('dng', 'profiles', True): 15, ('raw-menu', 'profiles', True): 16,
-    ('dng', 'info', True): 17, ('raw-menu', 'info', True): 18,
-    ('dng', None, True): 19, ('raw-menu', None, True): 20,
-}
 ADDON_TEXT = {'info': ' + INFO Camera stats (experimental)',
               'profiles': ' + Camera stats and picture-profile picker (experimental)'}
 DIAL_TEXT = ' + exposure compensation on the rear dial'
@@ -113,14 +105,7 @@ def build(option, stock, addon=None, dial=False):
     key = (option, version, addon, dial)
     if key in PENDING:
         fail('this combination is built but not yet tested on a camera; nothing was written.')
-    stage = STAGE[option, addon, dial]
-    if stage is None:
-        buf = bytearray(stock)
-        pos, _ = find_lump(buf, b'PXA')
-        m8_dngpatch._apply(buf, pos, RAW_PATCHES)       # checks the original bytes first
-        out = bytes(buf)
-    else:
-        _, out = m8_dngpatch.stage_file(stock, stage)   # stock -> RAW patch -> pieces; region-checked
+    _, out = m8_dngpatch.build_file(stock, option, addon, dial)   # stock -> RAW patch -> pieces; region-checked
     want, status = TESTED[key]
     if hashlib.sha256(out).hexdigest() != want:
         fail('the result does not match the tested build; nothing was written. Please report this.')
