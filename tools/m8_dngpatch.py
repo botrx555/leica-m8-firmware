@@ -22,6 +22,11 @@ stage. Stages are not cumulative: each is a complete build, one flash per stage.
                                          (owner's decision: stock curves stay the default)
   13     stage 4 + picker, picker key    INFO: Camera stats + profile picker     camera-tested 2026-10-27
   14     picker, picker key (no DNG)     Option 1 + Camera stats + profile picker camera-tested 2026-10-27
+  15     stage 13 + ev pieces        Rear dial sets exposure compensation  camera-tested 2026-11-02
+  16     stage 14 + ev pieces        Option 1 + picker + dial EV           emulator-tested
+  17     stage 8 + ev pieces         Option 2 + Camera stats + dial EV     emulator-tested
+  18     stage 10 + ev pieces        Option 1 + Camera stats + dial EV     emulator-tested
+         (ev pieces = ev, ev key, ev held, ev timer)
 
 Pieces (each in one declared region, REGIONS):
   canary  0x3CEA0 mov r0,#7 -> #0xA5: RAW header u16[3] = 0xA5
@@ -46,6 +51,14 @@ Pieces (each in one declared region, REGIONS):
   picker  0x2ABD0-0x2B6E8 (as screens) -> stubs at the four entries + Camera stats + picture-profile
           picker (tools/asm/m8_infopicker.s); 16 state bytes at 0x1531FC (ldimg's filename buffer)
   picker key   as info key, to its info_open (also 0x2ABD8)
+  ev      0x2C44C-0x2C9F4 `setting` debug command (printf of the settings table) -> stub at its entry +
+          exposure compensation on the rear dial (tools/asm/m8_infoev.s), rest undefined fill
+  ev key  0x44EDC application key handler, switch default `b 0x44F8C` -> `b ev_key` (keys outside
+          i..v in shooting mode; ev_key takes only the dial keys c / w, everything else returns as before)
+  ev held 0x44E9C same handler, `bne 0x44F8C` when `a` is held (every key ignored) -> `bne ev_held`
+          (dial keys, shutter not fully pressed, Leica's own dial window not enabled by the body)
+  ev timer 0xEF2B4 GUI event table: handler of event 0x271E (the dialog's timer) 0x43B64 -> ev_timer
+          (closes the EV page; any other case goes on to 0x43B64)
   modern curve  LUTS lump (not PXA): the 15 GAMMA tone curves -> MODERN (tools/m8_profile.py), generated
           from the stock table, checked against MODERN_CURVES_SHA; header and colour data unchanged
 
@@ -85,6 +98,10 @@ REGIONS = {
     'infokey': (0x44F68, 0x44F6C),  # application key handler, INFO outside service mode (bne 0x44F8C)
     'bfmem':  (0x2ABD0, 0x2B6E8),   # bf_memtest1/2/3, bf_checktrans + 2 helpers only bf_memtest2 calls
     'memtest12': (0x2ABD0, 0x2B338),  # bf_memtest1, the 2 helpers only bf_memtest2 calls, bf_memtest2
+    'setting': (0x2C44C, 0x2C9F4),  # reclaimed debug command `setting` (printf of the settings table)
+    'evkey':  (0x44EDC, 0x44EE0),   # application key handler, switch default (b 0x44F8C)
+    'evheld': (0x44E9C, 0x44EA0),   # application key handler, `a` held: every key ignored (bne 0x44F8C)
+    'evtimer': (0xEF2B4, 0xEF2B8),  # GUI event table, handler word of event 0x271E (0x43B64)
 }
 
 # tools/asm/m8_header.s at 0x3CE48 (46 instructions, replaces the stock block of the same size)
@@ -345,6 +362,40 @@ PICKER_CODE_SHA = 'd66489e061768bfad789082000bfbebd8e43fd20a1bc55d263b9b270b4467
 PICKER_ENTRY = 0x2ABD8                     # info_open
 PICKER_STATE = (0x1531FC, 0x15320C)        # its 16 state bytes: the `ldimg` command's filename buffer
 
+# tools/asm/m8_infoev.s at 0x2C44C (stub at the `setting` entry, exposure compensation on the rear dial)
+EV_CODE = bytes.fromhex(
+    '0000a0e31eff2fe1630055e3770055139cf39f15953b84e28d20d3e5000052e38cf39f15442393e5010012e380f39f15'
+    '020000ea630055e37700551370f39f1503002de9953b84e2b020d3e5000052e32200001aa00083e20fe0a0e154f39fe5'
+    '000050e31d00000a4c039fe5000090e5b200d0e1050050e31800000a0510a0e10fe0a0e134f39fe56f0c84e26c0080e2'
+    '0110a0e30fe0a0e124f39fe5953b84e20120a0e38f20c3e56f0c84e26c0080e20030a0e39930c0e54e0f80e204139fe5'
+    '001080e50110a0e30fe0a0e1f8f29fe5070a84e2a40080e20fe0a0e1010000ea0300bde8c8f29fe504e02de50cd04de2'
+    '0030a0e300308de504308de508308de5600080e2c4129fe57d2ea0e30130a0e30fe0a0e1b8f29fe50cd08de204f09de4'
+    'ff1001e2630051e3770051130b00001a10402de90040a0e10fe0a0e17cf29fe50400a0e10fe0a0e1e6ffffea0400a0e1'
+    '1040bde8002090e57510a0e31cf092e570229fe5002080e57310a0e368f29fe507ca80e2a4c08ce200309ce55c229fe5'
+    '020053e158f29f1504e02de50c00a0e1203090e5040013e338229f15002080150100000a0000a0e304f09de40fe0a0e1'
+    'eaffffea0000a0e304f09de410402de910d04de200208de52348a0e108408de50338a0e12338a0e104308de5052d60e2'
+    '1e30a0e30fe0a0e1f8f19fe510d08de21080bde804e02de504d04de200c08de50fe0a0e1e0f19fe504d08de204f09de4'
+    '04e02de5d4c19fe50000a0e30010a0e3052da0e31930a0e30fe0a0e1f0ffffea0800a0e30410a0e3b4219fe5b4319fe5'
+    '0fe0a0e1dcffffea0800a0e3da10a0e3a4219fe5a4319fe50fe0a0e1d6ffffea04f09de4f0402de924d04de248019fe5'
+    '000090e5b210d0e184219fe5020051e1b010d001050051e34700008a5020a0e3910220e0fe43d0e1120054e34200008a'
+    '60119fe5842191e75c119fe50d00a0e10fe0a0e154f19fe50d00a0e10410a0e30fe0a0e148f19fe5050d60e2a000a0e1'
+    '4e10a0e30d20a0e138319fe5090054e334319f150fe0a0e1b3ffffea0050a0e32270a0e30500a0e1030050e2fdffff5a'
+    '030070e30700a0e19010a0039610a0130e30a0030630a0130220a0e3fcc09fe50fe0a0e1b2ffffea015085e20e7087e2'
+    '130055e3eeffff3a0e00a0e3940000e01f0080e28c10a0e30820a0e31630a0e3acc09fe5090054e3c4c09f150fe0a0e1'
+    'a3ffffea1c00a0e3a610a0e3b4209fe5b4309fe50fe0a0e18fffffea9d00a0e3a610a0e3a4209fe59c309fe50fe0a0e1'
+    '89ffffea450fa0e3a610a0e390209fe584309fe50fe0a0e183ffffea24d08de2f080bde88c4f0400f003040030420d00'
+    '54590600e88f050084c80200600304001e27000010bd0800b8d10e006818060084c80200643b0400ec960900408a0900'
+    '45290000dcc80200ffff0300f2c802006d6b0300ffff000020a10d000cc90200ec940b000c9c0900ffff040020fd0400'
+    'b294000020fd000012c90200b294030015c9020017c902004cd30c0054d30c005cd30c0064d30c00d0a809006c1e0d00'
+    'b41e0d007ca409006cd30c00ac050600f0a809006cc50200d8ac090068ad09006cad09006003040070d30c0074d30c00'
+    '5cc60200b0c6020000000000000000004578706f7375726520636f6d70656e736174696f6e004469616c3a2061646a75'
+    '7374202020205345543a20646f6e65002573204556002d330030002b33000000')
+EV_CODE_SHA = '881699a0b1324da8a8527bd573453a8f187a31bb4a647c1a77539a7e33f56e66'
+EV_KEY_ENTRY = 0x2C480                     # ev_key
+EV_HELD_ENTRY = 0x2C454                    # ev_held
+EV_TIMER_ENTRY = 0x2C5BC                   # ev_timer
+SETTING_STOCK_SHA = '6dc5f765cba9cdd73fa7b8da9dac35f2f7571c3d304a3e79875575384e8f1c2f'
+
 
 def template():
     t, slots = m8_wrapdng.build_template(m8_wrapdng.BLACK)
@@ -436,6 +487,19 @@ def memtest12_blob():
     return STATS_CODE + UDF * ((hi - lo - len(STATS_CODE)) // 4)
 
 
+def ev_blob():
+    if hashlib.sha256(EV_CODE).hexdigest() != EV_CODE_SHA:
+        raise SystemExit('EV_CODE does not match its SHA-256')
+    lo, hi = REGIONS['setting']
+    if len(EV_CODE) > hi - lo:
+        raise SystemExit(f'setting overflow: {len(EV_CODE)} > {hi - lo} bytes')
+    return EV_CODE + UDF * ((hi - lo - len(EV_CODE)) // 4)
+
+
+def b(src, dst):
+    return struct.pack('<I', 0xEA000000 | (((dst - src - 8) >> 2) & 0xFFFFFF))
+
+
 def bl(src, dst):
     return struct.pack('<I', 0xEB000000 | (((dst - src - 8) >> 2) & 0xFFFFFF))
 
@@ -466,6 +530,10 @@ def pieces():
         'profile key': ('infokey', 0x44F68, bytes.fromhex('0700001a'), bne(0x44F68, PROFILE_ENTRY)),
         'picker': ('bfmem', REGIONS['bfmem'][0], BFMEM_STOCK_SHA, picker_blob()),
         'picker key': ('infokey', 0x44F68, bytes.fromhex('0700001a'), bne(0x44F68, PICKER_ENTRY)),
+        'ev': ('setting', REGIONS['setting'][0], SETTING_STOCK_SHA, ev_blob()),
+        'ev key': ('evkey', 0x44EDC, bytes.fromhex('2a0000ea'), b(0x44EDC, EV_KEY_ENTRY)),
+        'ev held': ('evheld', 0x44E9C, bytes.fromhex('3a00001a'), bne(0x44E9C, EV_HELD_ENTRY)),
+        'ev timer': ('evtimer', 0xEF2B4, struct.pack('<I', 0x43B64), struct.pack('<I', EV_TIMER_ENTRY)),
     }
 
 
@@ -488,6 +556,13 @@ STAGES = {
     13: ('as stage 8, plus a picture-profile picker: UP/DOWN lists \\PROFILES\\*.LUT, SET loads one',
          ['tiff', 'ldimg', 'hook', 'picker', 'picker key']),
     14: ('Option 1 (RAW patch only, no DNG) plus Camera stats + picture-profile picker', ['picker', 'picker key']),
+    15: ('as stage 13, plus exposure compensation on the rear dial',
+         ['tiff', 'ldimg', 'hook', 'picker', 'picker key', 'ev', 'ev key', 'ev held', 'ev timer']),
+    16: ('as stage 14, plus exposure compensation on the rear dial',
+         ['picker', 'picker key', 'ev', 'ev key', 'ev held', 'ev timer']),
+    17: ('as stage 8, plus exposure compensation on the rear dial',
+         ['tiff', 'ldimg', 'hook', 'stats', 'stats key', 'ev', 'ev key', 'ev held', 'ev timer']),
+    18: ('as stage 10, plus exposure compensation on the rear dial', ['stats', 'stats key', 'ev', 'ev key', 'ev held', 'ev timer']),
 }
 KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
     '3f84b34a225aeebe3f5f18cb658d4b14028d49d98e1fd1d1366ccf25a5830e66':
@@ -521,6 +596,15 @@ KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
         'flashed and camera-tested 2026-10-27 (every profile loaded and used for the next shot)',
     'e170f4493f8562cf7ce67bdb286b27bdc9a089898f12b48b1916af99a4fb8f9d':
         'stage 14, Option 1 + Camera stats + picker (picker bytes == stage 13); m8_infotest 86/0, m8_inforender 44/0, m8_savetest 39/0; flashed and camera-tested 2026-10-27 (owner report)',
+    '1254b7430a492c9197f2c4bb812bdd9a11e7d3b6a97fb043f245274b4fa07dfa':
+        'stage 15, stage 13 + exposure compensation on the rear dial; m8_evtest 120/0, m8_savetest 49/0; '
+        'flashed and camera-tested 2026-11-02 (owner report: works)',
+    '0776bad421170ca9a2dae0ebbbd956282e1821bd8ef7e587cabad43053d25b9d':
+        'stage 16, stage 14 + dial EV; m8_evtest 120/0, m8_savetest 39/0; not flashed yet',
+    '02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5':
+        'stage 17, stage 8 + dial EV; m8_evtest 120/0, m8_savetest 49/0; not flashed yet',
+    '2181425138fec847e607d777afaae493df68a35658e8aac55934c407d46947c1':
+        'stage 18, stage 10 + dial EV; m8_evtest 120/0, m8_savetest 39/0; not flashed yet',
 }
 
 

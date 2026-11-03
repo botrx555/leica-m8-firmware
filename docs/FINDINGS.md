@@ -779,6 +779,79 @@ Idea under study: INFO screen lists profile files on the card, SET loads one for
   86/0, m8_inforender 44/0, m8_savetest 39/0; flashed and camera-tested 2026-10-27 (owner's report,
   no files analysed).
 
+## Exposure compensation on the rear dial (static + emulator, 2026-10-31)
+
+Stock 2.014 sets exposure compensation only in the SET menu (Exp. comp., ±3 EV in ⅓ steps). The
+owner's dial test (shutter dial A and M, half-press held, dial turned): nothing happens.
+
+- **Rear dial = rotary encoder 0** of the PXA keypad controller (KPREC 0x41500010, driver 0x968A0):
+  each click posts key `w` (one direction) or `c` (the other) through the keypad's *release*
+  callback 0x99E8C (event 0xB) — table 0xF0DE0 `{'w', 'c'}`. Key releases reach the focused window's
+  key method; with no page open that is the GUI application's key handler 0x44E30, where `c`/`w`
+  fall into the switch default (0x44EDC `b 0x44F8C`) and are ignored.
+- **Leica's unused dial feature, `evfastaccess`** (window app+0x1AAB0, constructor 0x65808, vtable
+  0xED4CC, show/hide 0x658B4): key method 0x65A50 sends `c`/`w` to **0x65954 = one ⅓ EV step**:
+  reads the active profile's field +0x22 (signed u16, **0..18 = −3..+3 EV, 9 = 0**, factory default
+  9 at 0x21044), `w` +1 up to 18, `c` −1 down to 0, sets the working-profile index to 4
+  (0x219D4(settings, 4), as the SET menu does at 0x4E56C when not in Simple mode), stores the value
+  and posts **event 0x2715** (settings changed; main-task handler 0x3525C, the same event the SET
+  menu's 0x35208 sends). Show/hide posts 0x272B → 0x3DE58 → 0x3FAB0(…, 10, on/off): asks the body
+  to show the value in the viewfinder.
+  It opens from 0x45010 only when **`a` is held** (app+0x2548C), the shutter is not fully pressed
+  (`S`, app+0x2548D), not in Simple mode (app+0x25741) and **app+0x25744 bit 0** is set; that word is
+  the high byte of the body's status message 0x81 (0x3EDFC → event 0x28B0 → 0x45BD4). The body
+  never sets it on this camera (owner's test), so the feature is dormant.
+- **`a` / `S`:** body messages (0x3EB50, type = byte 1 & 7): 1 → state 0 → `a` press, 0 → state 4 →
+  `a` release (event 0x452 → 0x33640), 6 → `S` press, 7 → `S` release. While `a` is held the
+  application key handler ignores every key (0x44E9C `bne 0x44F8C`). Whether `a` means "half-press
+  held" or "exposure meter on" (which stays on for a while after a half-press) is not established.
+- **Text:** Leica's table 0xDA11C, 19 × {16.16 EV, string} "-3", "-2 2/3" … "0" … "+3" (used by the
+  playback info page through 0x4576C).
+- **Profiles:** settings override index 5 = **Simple mode** ("Active UserProfile: Simple" in the
+  `setting` debug command); 0x219DC(settings, app+0x25741) sets the override to 5 / 0xFFFF.
+- **Dialog timer:** BodyDebugDataDialog's timer object (dialog+0x60) is built by the base dialog
+  constructor 0x6046C (0x8BCDC(this+0x60, app)) when the application object is built; 0x8BD10(timer,
+  event, ms, one-shot, 0, 0, 0) arms it (Leica: 0x271E, 100 ms, at 0x61180); its SET path 0x61868
+  stops it (0x8BB88). Event 0x271E is in the GUI's event table (16-byte entries from 0xEF220, linked
+  at start-up by 0x40CA8, handler word read at dispatch): **0xEF2B4 = handler 0x43B64** (fetch body
+  data, redraw). Window flag +0x20 bit 2 (value 4) = hidden (0x9ADEC).
+
+### Stages 15–18: exposure compensation on the rear dial (`tools/asm/m8_infoev.s`)
+
+- Region **`setting` 0x2C44C–0x2C9F4** (1,448 bytes; the debug command that printf's the settings
+  table; only reference: its registration word 0x2DF2C), stub at the entry; 1,232 bytes used.
+- Four one-word hooks: **0x44EDC** `b 0x44F8C` → `b ev_key`; **0x44E9C** `bne 0x44F8C` → `bne ev_held`
+  (`a` held: dial keys only, not with `S` held, not when the body enabled Leica's own window);
+  **0xEF2B4** handler of event 0x271E 0x43B64 → `ev_timer`. Only `c`/`w` are taken; any other key
+  returns through 0x44F8C with all registers as stock.
+- A dial click outside service mode, outside Simple mode and with app+0x254B0 == 0: Leica's step
+  0x65954, then BodyDebugDataDialog opened the INFO way with method table `vt_ev`, and its timer
+  armed for **2,000 ms**, one shot. On the page: dial = step, re-arm, redraw; any other key (SET,
+  INFO, `a`, `S`, …) closes it through the dialog's own SET path with its own table back (timer
+  stopped). Timer event with `vt_ev` in the dialog: closed the same way (already hidden: only the
+  table restored); otherwise Leica's 0x43B64 unchanged.
+- Page: "Exposure compensation", Leica's value text + " EV" (white at 0, amber otherwise), a 19-tick
+  scale (full stops taller) with a marker, "-3 / 0 / +3", "Dial: adjust    SET: done".
+- Builds: **15** = stage 13 + ev (Option 2 + profiles), **16** = stage 14 + ev (Option 1 + profiles),
+  **17** = stage 8 + ev (Option 2 + INFO), **18** = stage 10 + ev (Option 1 + INFO). Each differs
+  from its base build only in setting / evkey / evheld / evtimer. SHA-256: 15 `1254b743…`,
+  16 `0776bad4…`, 17 `02301208…`, 18 `21814251…` (full values in m8_dngpatch KNOWN_OUTPUTS);
+  m8_savetest 49/0 (15, 17), 39/0 (16, 18).
+- **`tools/m8_evtest.py` 120/0:** key handler for all 256 keys in 12 GUI states vs the base build
+  (only `c`/`w` differ, in the normal and `a`-held states; return value unchanged); page keys;
+  timer cases; Leica's 0x65954 run for real for every value and both keys (clamping, profile 4,
+  event 0x2715); paint with the real GUI code and fonts (PNGs `work/ev-*.png`); references into
+  the new code. m8_infotest 86/0, m8_inforender (13) 44/0 unchanged.
+- **Stage 15 camera test (2026-11-02) [tested]:** flashed on the author's camera; owner's report:
+  "the exposure comp works great"; the value is kept after power off / on (saved with the other
+  settings, as a SET-menu change). `L1032065` (JPG + Leica's own DNG, A mode, 1/90 s, ISO 640):
+  EXIF ExposureBiasValue **+1.0 EV** in both files (step 12), so the dial's value reaches the
+  exposure and the file metadata like a SET-menu value.
+- Not modelled: the GUI's own work inside 0x58FE8 / 0x40360 / the dialog, and the body's handling of
+  event 0x2715 (the SET menu's own path). Camera checks not yet reported individually: dial in A, after a half-press, during
+  a long half-press, SET / INFO / timer close, a shot with the page open, power-off with the page open,
+  Simple mode (dial does nothing).
+
 ## Known 2.024 issue
 
 Some bodies stop saving images after 2.024 (LED blinks, nothing written). Fixed for some
