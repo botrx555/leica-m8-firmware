@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Emulator test of exposure compensation on the rear dial (tools/asm/m8_infoev.s; m8_dngpatch.py
---stage 15 / 16 / 17 / 18 = stage 13 / 14 / 8 / 10 + the pieces ev, ev key, ev timer).
+--stage 15 / 16 / 17 / 18 / 19 / 20 = stage 13 / 14 / 8 / 10 / 4 / Option 1 + the pieces ev, ev key,
+ev held, ev timer).
 
   1. Key path: the camera's real application key handler 0x44E30 (+ service gate 0x403F0 + the
      INFO code + ev_key) on each EV build and on its base build, every key code in every GUI state
@@ -45,7 +46,8 @@ from m8_rawpatch import PXA_BASE
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 SRC = os.path.join(ROOT, 'tools/asm/m8_infoev.s')
 LO, HI = d.REGIONS['setting']
-EV_BUILDS = {15: (13, 'bfmem'), 16: (14, 'bfmem'), 17: (8, 'memtest12'), 18: (10, 'memtest12')}
+EV_BUILDS = {15: (13, 'bfmem'), 16: (14, 'bfmem'), 17: (8, 'memtest12'), 18: (10, 'memtest12'),
+             19: (4, 'memtest12'), 20: (None, 'memtest12')}    # None = Option 1 (RAW patch only)
 SETTINGS = 0x14C910                 # the settings block's address on the camera ([0xD4230])
 APP = it.APP
 DIALOG = APP + 0x70A4
@@ -199,11 +201,12 @@ def main():
     pxas = {}
     for n, (base_n, region) in EV_BUILDS.items():
         base, sn = d.stage_file(stock, n)
-        _, sb = d.stage_file(stock, base_n)
+        sb = base if base_n is None else d.stage_file(stock, base_n)[1]
+        base_n = base_n or 'Option 1'
         pn, pb = d.pxa_of(sn), d.pxa_of(sb)
         pxas[n] = pn
         pos, size = d.find_lump(sn, b'PXA')
-        res.check(f'stage {n} vs stage {base_n}: changes only in setting + evkey + evtimer',
+        res.check(f'stage {n} vs stage {base_n}: changes only in setting + evkey + evheld + evtimer',
                   d.region_violations(sb, sn, pos, size, {'setting', 'evkey', 'evheld', 'evtimer'}), [])
         res.check(f'stage {n}: references into the new code', it.refs_into(pn, LO, HI),
                   ['word 0x2DF2C = 0x2C44C', 'branch 0x44E9C', 'branch 0x44EDC',

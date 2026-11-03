@@ -3,6 +3,35 @@
 Versions of this project (not Leica firmware versions). Every build is for Leica M8 firmware **2.014**.
 Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't flash it.
 
+## v0.6.0 — 2026-11-02
+
+- **New add-on, `--dial-ev`, for either option:** in shooting mode the rear dial sets exposure
+  compensation, ⅓ EV per click (−3 to +3 EV), shown on the screen; the screen closes 2 s after the
+  last click or with SET (or any other button). The value is the SET menu's own setting, changed by
+  Leica's unused dial routine found in the firmware; it stays set after power-off and shows in the
+  shot's EXIF. Picture in the README (`docs/assets/dial-ev.png`).
+- **Add-ons combine:** `--info` or `--profiles`, plus `--dial-ev`, with either option: 12 builds.
+  Each is made of pieces that were all tested on a camera, kept byte-identical in every combination
+  (checked by the new `tools/m8_combotest.py`); the README "Builds" table and `m8patch.py` say which
+  exact files were also flashed.
+- Developers: `tools/asm/m8_infoev.s`, `tools/m8_evtest.py`; stages 15–20 in `m8_dngpatch.py`.
+- Builds without `--dial-ev` are unchanged (same hashes as v0.5.0).
+
+| Build | SHA-256 | On a camera |
+|---|---|---|
+| 1 `raw-menu` | `f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396` | exact file (2026-10-19) |
+| 1 `raw-menu --info` | `fa4ae63a22e2df9749e989ccc570808ac24dabe1a3992593c4c37d27ad6c1c43` | exact file (2026-10-23) |
+| 1 `raw-menu --profiles` | `e170f4493f8562cf7ce67bdb286b27bdc9a089898f12b48b1916af99a4fb8f9d` | exact file (2026-10-27) |
+| 1 `raw-menu --dial-ev` | `823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25` | pieces |
+| 1 `raw-menu --info --dial-ev` | `2181425138fec847e607d777afaae493df68a35658e8aac55934c407d46947c1` | pieces |
+| 1 `raw-menu --profiles --dial-ev` | `0776bad421170ca9a2dae0ebbbd956282e1821bd8ef7e587cabad43053d25b9d` | pieces |
+| 2 `dng` | `55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c` | exact file (2026-10-21) |
+| 2 `dng --info` | `32e6854ec0bc451667ef4f8f6b40dfb4c8af406a43db84e94b90abeb380408f8` | exact file (2026-10-23) |
+| 2 `dng --profiles` | `d7a17ef25309af7780f24bc2bf240bfd8e68cb6e4edb6aa0845e07524d273b14` | exact file (2026-10-27) |
+| 2 `dng --dial-ev` | `31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074` | pieces |
+| 2 `dng --info --dial-ev` | `02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5` | pieces |
+| 2 `dng --profiles --dial-ev` | `1254b7430a492c9197f2c4bb812bdd9a11e7d3b6a97fb043f245274b4fa07dfa` | exact file (2026-11-02) |
+
 ## v0.5.0 — 2026-10-27
 
 - **New add-on, `--profiles` (experimental), for either option:** Camera stats plus a

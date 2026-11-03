@@ -833,11 +833,12 @@ owner's dial test (shutter dial A and M, half-press held, dial turned): nothing 
 - Page: "Exposure compensation", Leica's value text + " EV" (white at 0, amber otherwise), a 19-tick
   scale (full stops taller) with a marker, "-3 / 0 / +3", "Dial: adjust    SET: done".
 - Builds: **15** = stage 13 + ev (Option 2 + profiles), **16** = stage 14 + ev (Option 1 + profiles),
-  **17** = stage 8 + ev (Option 2 + INFO), **18** = stage 10 + ev (Option 1 + INFO). Each differs
-  from its base build only in setting / evkey / evheld / evtimer. SHA-256: 15 `1254b743…`,
+  **17** = stage 8 + ev (Option 2 + INFO), **18** = stage 10 + ev (Option 1 + INFO), **19** = stage 4 +
+  ev (Option 2), **20** = Option 1 + ev. Each differs from its base build only in setting / evkey /
+  evheld / evtimer. Stage 19 `31c1ac63…`, 20 `823ef5c8…` (m8_savetest 49/0, 39/0). SHA-256: 15 `1254b743…`,
   16 `0776bad4…`, 17 `02301208…`, 18 `21814251…` (full values in m8_dngpatch KNOWN_OUTPUTS);
   m8_savetest 49/0 (15, 17), 39/0 (16, 18).
-- **`tools/m8_evtest.py` 120/0:** key handler for all 256 keys in 12 GUI states vs the base build
+- **`tools/m8_evtest.py` 164/0 (stages 15–20):** key handler for all 256 keys in 12 GUI states vs the base build
   (only `c`/`w` differ, in the normal and `a`-held states; return value unchanged); page keys;
   timer cases; Leica's 0x65954 run for real for every value and both keys (clamping, profile 4,
   event 0x2715); paint with the real GUI code and fonts (PNGs `work/ev-*.png`); references into
@@ -851,6 +852,19 @@ owner's dial test (shutter dial A and M, half-press held, dial turned): nothing 
   event 0x2715 (the SET menu's own path). Camera checks not yet reported individually: dial in A, after a half-press, during
   a long half-press, SET / INFO / timer close, a shot with the page open, power-off with the page open,
   Simple mode (dial does nothing).
+
+### Combining add-ons (v0.6.0, 2026-11-02)
+
+- **Owner's decision:** a build may ship when every piece in it is camera-tested, not only when the
+  exact file was flashed. Pieces and the camera-tested build each is checked against: RAW patch
+  (Option 1, `f6589c41`), DNG writer (header + ldimg + hook, stage 4), Camera stats (memtest12 +
+  infokey, stage 8), profile picker (bfmem + infokey, stage 13), dial EV (setting + evkey + evheld +
+  evtimer, stage 15). Camera stats and the picker overlap (bfmem ⊃ memtest12, both use infokey), so
+  they never combine; every other pair is disjoint.
+- `tools/m8_combotest.py` 96/0: all 12 m8patch builds have the listed hash, equal their stage file,
+  differ from Option 1 only inside their pieces' regions, and carry each piece byte-identical to its
+  reference build; m8patch's "exact"/"pieces" status matches the record. Behaviour of the combined
+  code: m8_evtest (stages 15–20, 164/0), m8_infotest, m8_inforender, m8_savetest (every stage).
 
 ## Known 2.024 issue
 

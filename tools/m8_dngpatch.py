@@ -26,6 +26,8 @@ stage. Stages are not cumulative: each is a complete build, one flash per stage.
   16     stage 14 + ev pieces        Option 1 + picker + dial EV           emulator-tested
   17     stage 8 + ev pieces         Option 2 + Camera stats + dial EV     emulator-tested
   18     stage 10 + ev pieces        Option 1 + Camera stats + dial EV     emulator-tested
+  19     stage 4 + ev pieces         Option 2 + dial EV                    emulator-tested (pieces camera-tested)
+  20     ev pieces (no DNG)          Option 1 + dial EV                    emulator-tested (pieces camera-tested)
          (ev pieces = ev, ev key, ev held, ev timer)
 
 Pieces (each in one declared region, REGIONS):
@@ -563,6 +565,10 @@ STAGES = {
     17: ('as stage 8, plus exposure compensation on the rear dial',
          ['tiff', 'ldimg', 'hook', 'stats', 'stats key', 'ev', 'ev key', 'ev held', 'ev timer']),
     18: ('as stage 10, plus exposure compensation on the rear dial', ['stats', 'stats key', 'ev', 'ev key', 'ev held', 'ev timer']),
+    19: ('as stage 4, plus exposure compensation on the rear dial',
+         ['tiff', 'ldimg', 'hook', 'ev', 'ev key', 'ev held', 'ev timer']),
+    20: ('Option 1 (RAW patch only, no DNG) plus exposure compensation on the rear dial',
+         ['ev', 'ev key', 'ev held', 'ev timer']),
 }
 KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
     '3f84b34a225aeebe3f5f18cb658d4b14028d49d98e1fd1d1366ccf25a5830e66':
@@ -600,11 +606,15 @@ KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
         'stage 15, stage 13 + exposure compensation on the rear dial; m8_evtest 120/0, m8_savetest 49/0; '
         'flashed and camera-tested 2026-11-02 (owner report: works)',
     '0776bad421170ca9a2dae0ebbbd956282e1821bd8ef7e587cabad43053d25b9d':
-        'stage 16, stage 14 + dial EV; m8_evtest 120/0, m8_savetest 39/0; not flashed yet',
+        'stage 16, stage 14 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 39/0; not flashed; every piece camera-tested (v0.6.0)',
     '02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5':
-        'stage 17, stage 8 + dial EV; m8_evtest 120/0, m8_savetest 49/0; not flashed yet',
+        'stage 17, stage 8 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 49/0; not flashed; every piece camera-tested (v0.6.0)',
     '2181425138fec847e607d777afaae493df68a35658e8aac55934c407d46947c1':
-        'stage 18, stage 10 + dial EV; m8_evtest 120/0, m8_savetest 39/0; not flashed yet',
+        'stage 18, stage 10 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 39/0; not flashed; every piece camera-tested (v0.6.0)',
+    '31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074':
+        'stage 19, stage 4 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 49/0; not flashed; every piece camera-tested (v0.6.0)',
+    '823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25':
+        'stage 20, Option 1 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 39/0; not flashed; every piece camera-tested (v0.6.0)',
 }
 
 

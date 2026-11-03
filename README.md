@@ -16,8 +16,10 @@ Optional add-ons for either option (experimental):
 - **Picture profiles** (`--profiles`): Camera stats plus a profile picker. Load your own JPG tone
   curves (for example Nikon Picture Control files from nikonpc.com) from the SD card; the camera's
   own curves stay the default.
+- **Exposure compensation on the rear dial** (`--dial-ev`): turn the dial in shooting mode instead
+  of going through the SET menu. Combines with either of the above.
 
-> **Status: tested on one camera.** Both patches and the add-ons run on the author's M8 with firmware 2.014. They are
+> **Status: tested on one camera.** Both patches and every add-on run on the author's M8 with firmware 2.014. They are
 > experimental, not affiliated with or endorsed by Leica, and flashing modified firmware is at your
 > own risk. Read [Safety and recovery](#safety-and-recovery) before flashing anything.
 
@@ -105,6 +107,26 @@ camera with both options.
 
 Includes Camera stats, plus a picker for JPG tone curves stored on the card. See
 [Picture profiles](#picture-profiles-experimental) below.
+
+### Add-on: Exposure compensation on the rear dial (`--dial-ev`)
+
+On a stock M8, exposure compensation is only in the SET menu. With `--dial-ev`, turning the rear
+dial in shooting mode changes it by ⅓ EV per click (−3 to +3 EV) and shows the value on the screen:
+
+<p align="center"><img src="docs/assets/dial-ev.png" width="640"
+alt="Exposure compensation screen at 0 EV and at -1 1/3 EV, with a scale from -3 to +3"></p>
+<p align="center"><sub>Rendered in the emulator with the camera's own drawing routines and fonts
+(<code>tools/m8_evtest.py</code>), 2× size.</sub></p>
+
+- The value changes with every click, straight away; it shows in amber when it isn't 0.
+- The screen closes 2 seconds after the last click, or at once with SET, INFO, any other button or
+  the shutter. The value stays set, also after power-off, exactly like a SET-menu change: it is the
+  same setting, changed by Leica's own (unused) dial routine found in the firmware, and the shot's
+  EXIF shows it.
+- Works in every shooting mode where the menu setting does. Service mode and Simple mode are
+  unchanged (the dial does nothing there, as in stock).
+
+It combines with `--info` or `--profiles`. Tested on the author's camera with Option 2 + `--profiles`.
 
 With Option 2, each JPG fine+RAW shot produces:
 
@@ -194,27 +216,48 @@ python3 m8patch.py raw-menu  ~/Downloads/m8-2_014.upd     # Option 1
 python3 m8patch.py dng       ~/Downloads/m8-2_014.upd     # Option 2
 ```
 
-Add `--info` to either command for the Camera stats add-on, or `--profiles` for Camera stats plus
-the picture-profile picker, for example `python3 m8patch.py dng ~/Downloads/m8-2_014.upd --profiles`.
+Add-ons, in any combination with either option:
+
+- `--info` (Camera stats) **or** `--profiles` (Camera stats plus the picture-profile picker);
+- `--dial-ev` (exposure compensation on the rear dial), alone or with one of the above.
+
+For example: `python3 m8patch.py dng ~/Downloads/m8-2_014.upd --profiles --dial-ev`.
 
 The script:
 
 - only reads your stock file and never changes it;
 - refuses anything that isn't Leica's unmodified 2.014 file;
-- writes the result to `build/m8-2_014-raw-menu.upd` or `build/m8-2_014-dng.upd` (with an add-on:
-  `…-dng-info.upd`, `…-dng-profiles.upd`, and so on). It never overwrites an existing file; `--out-dir DIR`
-  writes somewhere else;
-- writes it only if it is byte-identical to the build tested by the author, and prints its SHA-256
-  and the next steps.
+- writes the result to `build/m8-2_014-raw-menu.upd` or `build/m8-2_014-dng.upd` (with add-ons:
+  `…-dng-info.upd`, `…-dng-profiles-dial.upd`, and so on). It never overwrites an existing file;
+  `--out-dir DIR` writes somewhere else;
+- writes it only if it is byte-identical to one of the builds below, and prints its SHA-256, whether
+  that exact file was tested on a camera, and the next steps.
 
-| Result | SHA-256 |
-|---|---|
-| Option 1, 2.014 | `f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396` |
-| Option 2, 2.014 | `55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c` |
-| Option 1 + `--info`, 2.014 | `fa4ae63a22e2df9749e989ccc570808ac24dabe1a3992593c4c37d27ad6c1c43` |
-| Option 2 + `--info`, 2.014 | `32e6854ec0bc451667ef4f8f6b40dfb4c8af406a43db84e94b90abeb380408f8` |
-| Option 1 + `--profiles`, 2.014 | `e170f4493f8562cf7ce67bdb286b27bdc9a089898f12b48b1916af99a4fb8f9d` |
-| Option 2 + `--profiles`, 2.014 | `d7a17ef25309af7780f24bc2bf240bfd8e68cb6e4edb6aa0845e07524d273b14` |
+### Builds
+
+Each build is made of pieces: the RAW patch (always), the DNG writer (Option 2), Camera stats or the
+profile picker, and the dial. **Every piece has been tested on a camera.** The pieces live in
+separate parts of the firmware and don't touch each other, so a combination contains each piece's
+code byte for byte as it was tested; `tools/m8_combotest.py` checks this for all 12 combinations,
+and the emulator tests run every combination. Builds marked *exact* were also flashed as that exact
+file.
+
+| Build (2.014) | SHA-256 | On a camera |
+|---|---|---|
+| Option 1 | `f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396` | exact |
+| Option 1 + `--info` | `fa4ae63a22e2df9749e989ccc570808ac24dabe1a3992593c4c37d27ad6c1c43` | exact |
+| Option 1 + `--profiles` | `e170f4493f8562cf7ce67bdb286b27bdc9a089898f12b48b1916af99a4fb8f9d` | exact |
+| Option 1 + `--dial-ev` | `823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25` | pieces |
+| Option 1 + `--info --dial-ev` | `2181425138fec847e607d777afaae493df68a35658e8aac55934c407d46947c1` | pieces |
+| Option 1 + `--profiles --dial-ev` | `0776bad421170ca9a2dae0ebbbd956282e1821bd8ef7e587cabad43053d25b9d` | pieces |
+| Option 2 | `55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c` | exact |
+| Option 2 + `--info` | `32e6854ec0bc451667ef4f8f6b40dfb4c8af406a43db84e94b90abeb380408f8` | exact |
+| Option 2 + `--profiles` | `d7a17ef25309af7780f24bc2bf240bfd8e68cb6e4edb6aa0845e07524d273b14` | exact |
+| Option 2 + `--dial-ev` | `31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074` | pieces |
+| Option 2 + `--info --dial-ev` | `02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5` | pieces |
+| Option 2 + `--profiles --dial-ev` | `1254b7430a492c9197f2c4bb812bdd9a11e7d3b6a97fb043f245274b4fa07dfa` | exact |
+
+If you flash a *pieces* build, please report how it went (option, add-ons, SHA-256) in an issue.
 
 ## Flash it
 
@@ -226,14 +269,17 @@ The script:
    usually pauses around 60% before completing. **Don't touch the battery or card while it runs.**
 5. After the restart: SET → Compression → **JPG fine+RAW**. Take a test shot and check it on the
    computer. With `--info`, press INFO in shooting mode: Camera stats appears, INFO or SET closes it.
-   With `--profiles`, see [Picture profiles](#picture-profiles-experimental).
+   With `--profiles`, see [Picture profiles](#picture-profiles-experimental). With `--dial-ev`, turn
+   the rear dial in shooting mode.
 
 ## Safety and recovery
 
 **What the patches change, and what they don't.** The RAW patch (both options) changes three
 instructions: one in the settings loader, which runs at every start-up (it keeps JPG fine+RAW
 instead of resetting it), and two in the SET-menu loader (they list it in Compression). Option 2
-adds the DNG code, and `--info` adds the INFO screen; each is reached through one changed branch.
+adds the DNG code, `--info` / `--profiles` add the INFO screen (each reached through one changed
+branch), and `--dial-ev` adds the dial code (two changed branches in the key handler plus one entry of
+the screen's event table, for its 2-second close).
 Everything else stays byte-identical: the bootloader (RedBoot, not in the update file at all), the
 SD-card updater, the rest of the startup code and of settings load/save, and every other part of
 the update file (DSP, FPGA, body controller, fonts, lens table). The patch scripts check this
@@ -244,7 +290,10 @@ code runs only when INFO is pressed in shooting mode; it opens the screen the wa
 service menu does, draws with the camera's own drawing routines, and changes no settings. The
 `--profiles` picker additionally reads the card's `PROFILES` folder and, when you press SET, sends
 the chosen curve to the image processor until power-off; it writes nothing to the card, flash or
-settings.
+settings. The `--dial-ev` code runs only when the dial is turned in shooting mode; it changes
+exposure compensation with the camera's own routine for it, which updates the setting the same way
+the SET menu does (and like the menu, the camera saves it at power-off), and shows it with the same
+screen mechanism as `--info`.
 
 **Rolling back.** The updater accepts the same or an older version, so flashing the stock
 `m8-2_014.upd` from the card returns the camera to stock. This relies on the patched firmware
@@ -281,6 +330,10 @@ camera to Leica for service, reflash stock.
 - **`--info`:** the screen is English only, and the temperature is the body's own reading, shown as
   °C. If the camera is switched off while Camera stats is open, the service page "Body Debug Data"
   shows Camera stats instead until the next restart (no effect outside service mode).
+- **`--dial-ev`:** the value shows on the rear screen only, not in the viewfinder (Leica's own,
+  unfinished version of this feature would have used the viewfinder display, but the body controller
+  never enables it). A bumped dial changes the compensation; the screen lights up when that happens.
+  Builds marked *pieces* above haven't been flashed as that exact file yet.
 
 ## How it works
 
@@ -306,6 +359,12 @@ analysis with Capstone and Ghidra, then checked in an emulator and on the camera
   mode, where stock ignores it) to new code in the space of two unused Blackfin-test debug commands.
   It opens the service menu's Body Debug Data dialog the way the service menu does, with its own
   drawing and key methods while open, and restores the dialog's methods on close.
+- **Dial EV (`--dial-ev`):** the rear dial sends two keys (`c`/`w`) that stock ignores in shooting mode.
+  The firmware already contains Leica's step routine for them (part of an unused "EV fast access"
+  window); two branches in the key handler send the dial keys to new code (in the space of the
+  unused `setting` debug command), which calls that routine and shows the value on the same borrowed
+  dialog as INFO. The dialog's own timer, re-aimed through one entry of the screen's event table,
+  closes it after 2 seconds.
 
 Every address, offset and decision, with the evidence for it, is in
 [`docs/FINDINGS.md`](docs/FINDINGS.md). The design, staging and risk assessment are in
@@ -321,9 +380,11 @@ Every address, offset and decision, with the evidence for it, is in
   kept for diagnosis: 1 = header canary, 2 = new code present but not hooked in, 3 = metadata dump,
   5 = `.DNG` names. It prints every changed instruction and checks that nothing outside the
   declared regions changed.
-- INFO add-on: stage 8 = Option 2 + `--info`, stage 10 = Option 1 + `--info` (both camera-tested).
-  Stages 6 (INFO opens the service page) and 7 (an INFO histogram, dropped) are kept as history.
-  See `docs/FINDINGS.md`, "GUI".
+- Add-ons: stages 8 / 10 = Option 2 / Option 1 + `--info`; 13 / 14 = + `--profiles`; 15–20 = the
+  same with `--dial-ev` (15 = Option 2 + `--profiles --dial-ev`, 16 = Option 1 + `--profiles
+  --dial-ev`, 17 / 18 = `--info --dial-ev`, 19 / 20 = `--dial-ev` alone). Stages 6 (INFO opens the
+  service page), 7 (an INFO histogram, dropped), 11 and 12 (tone-curve tests) are kept as history.
+  See `docs/FINDINGS.md`, "GUI" and "Exposure compensation on the rear dial".
 
 ```sh
 python3 -m venv work/venv && work/venv/bin/pip install -r requirements.txt   # Capstone, Unicorn, …
@@ -349,8 +410,10 @@ at the end and prints little before that, so a long silence is normal.
 | `m8_savetest.py --stage 4` | Option 2: one build through the save path | ~2.5 min |
 | `m8_savetest.py --quick` | every stage, fewer variants per sample | ~3.5 min |
 | `m8_savetest.py` | every stage, all variants | ~9 min |
-| `m8_infotest.py` | `--info` builds (stages 6–10): key handling, every key in every GUI state | ~10 s |
-| `m8_inforender.py` | `--info` screen: renders it with the camera's drawing code (PNG) | ~2 s |
+| `m8_infotest.py` | `--info` / `--profiles` builds: key handling, every key in every GUI state | ~10 s |
+| `m8_inforender.py` | `--info` / `--profiles` screens: rendered with the camera's drawing code (PNG) | ~2 s |
+| `m8_evtest.py` | `--dial-ev` builds: key handling in every GUI state, close timer, Leica's EV step, screen | ~40 s |
+| `m8_combotest.py` | all 12 `m8patch.py` builds: hashes, each piece byte-identical to its camera-tested build | ~5 s |
 
 `m8_savetest.py` runs the real store routine, DMA handler, ring buffer and RAW writer. It models the
 DMA controller and the card-writer task. For each build it compares the file that reaches the "card"
@@ -365,14 +428,15 @@ names. `m8_emutest.py` needs the RAW-patch build at `firmware/patched/m8-2_014.u
 
 | Path | Contents |
 |---|---|
-| `m8patch.py` | Build Option 1 or Option 2 (optionally `--info`) from your stock file (start here) |
+| `m8patch.py` | Build Option 1 or Option 2 with any add-ons from your stock file, make profile files (start here) |
 | `CHANGELOG.md` | Versions of this project, with the build hash of each option |
 | `tools/m8_rawpatch.py` | Persistent-RAW patch (2.014) |
-| `tools/m8_dngpatch.py` | Staged builds (`--stage 1…10`: DNG 1–5, INFO 6–10), with region and hash checks |
-| `tools/asm/` | Assembly source of the new code (DNG: `m8_header.s`, `m8_dnghook.s`; INFO: `m8_info*.s`) |
+| `tools/m8_dngpatch.py` | Staged builds (`--stage 1…20`: DNG 1–5, add-ons 6–20), with region and hash checks |
+| `tools/asm/` | Assembly source of the new code (DNG: `m8_header.s`, `m8_dnghook.s`; INFO and dial: `m8_info*.s`) |
+| `tools/m8_profile.py`, `tools/ncp.py`, `tools/m8_curvesim.py` | Picture profiles: .LUT builder, Nikon .NCP reader, curve preview |
 | `tools/m8_asm.py` | Assembles one source with clang and checks it against the frozen bytes |
 | `tools/m8_wrapdng.py` | Desktop RAW → DNG wrapper; the reference for the in-camera file and its tag template |
-| `tools/m8_emutest.py`, `tools/m8_savetest.py`, `tools/m8_infotest.py`, `tools/m8_inforender.py` | Emulator tests (durations under [Testing](#testing-without-a-camera)) |
+| `tools/m8_emutest.py`, `tools/m8_savetest.py`, `tools/m8_infotest.py`, `tools/m8_inforender.py`, `tools/m8_evtest.py`, `tools/m8_combotest.py` | Emulator and build tests (durations under [Testing](#testing-without-a-camera)) |
 | `tools/m8_font.py` | Decodes and renders the camera's GUI fonts |
 | `tools/m8_reclaim.py` | Ranks unused debug commands as space for new code |
 | `tools/armtools.py`, `tools/split_upd.py`, `tools/ghidra/` | Analysis helpers |

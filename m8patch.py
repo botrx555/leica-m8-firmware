@@ -13,15 +13,21 @@ make picture-profile files for it.
                        plus a picture-profile picker: UP lists the profiles in the card's
                        \\PROFILES folder, SET loads one as the JPG tone curve until power-off.
                        The camera's own curves stay the default.
+  --dial-ev            add-on for either option, alone or with --info / --profiles: the rear
+                       dial sets exposure compensation in shooting mode (1/3 EV per click,
+                       shown on the screen; closes after 2 s or with SET).
 Both need Leica's stock firmware 2.014 (the only version tested); other files are refused.
 
-Usage:  python3 m8patch.py raw-menu|dng path/to/m8-2_014.upd [--info | --profiles] [--out-dir DIR]
+Usage:  python3 m8patch.py raw-menu|dng path/to/m8-2_014.upd [--info | --profiles] [--dial-ev]
+                                                            [--out-dir DIR]
         python3 m8patch.py profiles path/to/m8-2_014.upd PROFILE... [--base srgb|modern|leica]
                                                                     [--out-dir DIR]
 
 Firmware: your stock file is only read, never changed. The result is written to DIR (default:
-build/ next to this script) as m8-<version>-<option>[-info|-profiles].upd. An existing file is
-never overwritten, and only a result identical to the build tested by the author is written.
+build/ next to this script) as m8-<version>-<option>[-info|-profiles][-dial].upd. An existing
+file is never overwritten, and only one of the known results below is written (TESTED): every
+combination is built from pieces each tested on a camera, and checked as a whole in the emulator
+(tools/m8_combotest.py); the status line says whether that exact file was also flashed.
 Then copy it to an SD card and rename it there, as the script explains (README "Flash it").
 
 Profiles: each PROFILE is a Nikon Picture Control file (.ncp), a text file of "input,output"
@@ -35,34 +41,55 @@ Needs only Python 3 (standard library).
 """
 import hashlib, os, sys
 
-VERSION = '0.5.0'                   # project version (CHANGELOG.md), not a Leica firmware version
+VERSION = '0.6.0'                   # project version (CHANGELOG.md), not a Leica firmware version
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, 'tools'))
 from m8_rawpatch import KNOWN_INPUTS, PATCHES as RAW_PATCHES, find_lump
 import m8_dngpatch
 
-# (option, firmware, add-on) -> (SHA-256 of the result, status). Only these exact results
-# are written.
+# Status texts: the exact file was flashed and used on a camera, or only its pieces were.
+EXACT = 'this exact build tested on a camera ({})'
+PIECES = 'each piece tested on a camera; this combination tested in the emulator'
+# (option, firmware, screen add-on, dial) -> (SHA-256 of the result, status). Only these exact
+# results are written. Pieces: Option 1 (RAW patch), DNG writer, INFO Camera stats, profile picker
+# (includes Camera stats), dial EV -- see README "Builds".
 TESTED = {
-    ('raw-menu', '2.014', None): ('f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396',
-                                  'tested on a camera (2026-10-19)'),
-    ('dng', '2.014', None): ('55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c',
-                             'tested on a camera (2026-10-21)'),
-    ('dng', '2.014', 'info'): ('32e6854ec0bc451667ef4f8f6b40dfb4c8af406a43db84e94b90abeb380408f8',
-                               'tested on a camera (2026-10-23)'),
-    ('raw-menu', '2.014', 'info'): ('fa4ae63a22e2df9749e989ccc570808ac24dabe1a3992593c4c37d27ad6c1c43',
-                                    'tested on a camera (2026-10-23)'),
-    ('dng', '2.014', 'profiles'): ('d7a17ef25309af7780f24bc2bf240bfd8e68cb6e4edb6aa0845e07524d273b14',
-                                   'tested on a camera (2026-10-27)'),
-    ('raw-menu', '2.014', 'profiles'): ('e170f4493f8562cf7ce67bdb286b27bdc9a089898f12b48b1916af99a4fb8f9d',
-                                        'tested on a camera (2026-10-27)'),
+    ('raw-menu', '2.014', None, False): ('f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396',
+                                         EXACT.format('2026-10-19')),
+    ('dng', '2.014', None, False): ('55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c',
+                                    EXACT.format('2026-10-21')),
+    ('dng', '2.014', 'info', False): ('32e6854ec0bc451667ef4f8f6b40dfb4c8af406a43db84e94b90abeb380408f8',
+                                      EXACT.format('2026-10-23')),
+    ('raw-menu', '2.014', 'info', False): ('fa4ae63a22e2df9749e989ccc570808ac24dabe1a3992593c4c37d27ad6c1c43',
+                                           EXACT.format('2026-10-23')),
+    ('dng', '2.014', 'profiles', False): ('d7a17ef25309af7780f24bc2bf240bfd8e68cb6e4edb6aa0845e07524d273b14',
+                                          EXACT.format('2026-10-27')),
+    ('raw-menu', '2.014', 'profiles', False): ('e170f4493f8562cf7ce67bdb286b27bdc9a089898f12b48b1916af99a4fb8f9d',
+                                               EXACT.format('2026-10-27')),
+    ('dng', '2.014', 'profiles', True): ('1254b7430a492c9197f2c4bb812bdd9a11e7d3b6a97fb043f245274b4fa07dfa',
+                                         EXACT.format('2026-11-02')),
+    ('raw-menu', '2.014', 'profiles', True): ('0776bad421170ca9a2dae0ebbbd956282e1821bd8ef7e587cabad43053d25b9d',
+                                              PIECES),
+    ('dng', '2.014', 'info', True): ('02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5', PIECES),
+    ('raw-menu', '2.014', 'info', True): ('2181425138fec847e607d777afaae493df68a35658e8aac55934c407d46947c1',
+                                          PIECES),
+    ('dng', '2.014', None, True): ('31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074', PIECES),
+    ('raw-menu', '2.014', None, True): ('823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25',
+                                        PIECES),
 }
-# Built and emulator-tested, waiting for a camera test: refused until then.
+# Built, waiting for a camera test of a new piece: refused until then.
 PENDING = {}
-ADDON_STAGE = {('raw-menu', 'info'): 10, ('dng', 'info'): 8,          # m8_dngpatch stages
-               ('raw-menu', 'profiles'): 14, ('dng', 'profiles'): 13}
+STAGE = {  # (option, screen add-on, dial) -> m8_dngpatch stage; None = the RAW patch alone
+    ('raw-menu', None, False): None, ('dng', None, False): 4,
+    ('dng', 'info', False): 8, ('raw-menu', 'info', False): 10,
+    ('dng', 'profiles', False): 13, ('raw-menu', 'profiles', False): 14,
+    ('dng', 'profiles', True): 15, ('raw-menu', 'profiles', True): 16,
+    ('dng', 'info', True): 17, ('raw-menu', 'info', True): 18,
+    ('dng', None, True): 19, ('raw-menu', None, True): 20,
+}
 ADDON_TEXT = {'info': ' + INFO Camera stats (experimental)',
               'profiles': ' + Camera stats and picture-profile picker (experimental)'}
+DIAL_TEXT = ' + exposure compensation on the rear dial'
 CARD_NAME = {'2.014': 'M8-2_014.UPD'}
 OPTIONS = {'raw-menu': 'Option 1: JPG fine+RAW in the menu, kept after power-off',
            'dng': 'Option 2: Option 1 + 14-bit DNG written by the camera'}
@@ -81,20 +108,20 @@ def stock_version(stock):
     return version
 
 
-def build(option, stock, addon=None):
+def build(option, stock, addon=None, dial=False):
     version = stock_version(stock)
-    if (option, version, addon) in PENDING:
-        fail(f'{option} --{addon} is built but not yet tested on a camera; nothing was written.')
-    if addon:
-        _, out = m8_dngpatch.stage_file(stock, ADDON_STAGE[option, addon])   # region-checked
-    elif option == 'raw-menu':
+    key = (option, version, addon, dial)
+    if key in PENDING:
+        fail('this combination is built but not yet tested on a camera; nothing was written.')
+    stage = STAGE[option, addon, dial]
+    if stage is None:
         buf = bytearray(stock)
         pos, _ = find_lump(buf, b'PXA')
         m8_dngpatch._apply(buf, pos, RAW_PATCHES)       # checks the original bytes first
         out = bytes(buf)
     else:
-        _, out = m8_dngpatch.stage_file(stock, 4)       # stock -> RAW patch -> DNG; region-checked
-    want, status = TESTED[option, version, addon]
+        _, out = m8_dngpatch.stage_file(stock, stage)   # stock -> RAW patch -> pieces; region-checked
+    want, status = TESTED[key]
     if hashlib.sha256(out).hexdigest() != want:
         fail('the result does not match the tested build; nothing was written. Please report this.')
     return version, out, status
@@ -201,6 +228,9 @@ Next (needs a build made with --profiles):
   The .LUT files contain Leica data from your stock file: keep them private.""")
         return
 
+    dial = '--dial-ev' in args
+    if dial:
+        args.remove('--dial-ev')
     addon = None
     for flag in ('--info', '--profiles'):
         if flag in args:
@@ -213,10 +243,11 @@ Next (needs a build made with --profiles):
     option, src = args
     if not os.path.isfile(src):
         fail(f'{src}: no such file')
-    version, out, status = build(option, open(src, 'rb').read(), addon)
+    version, out, status = build(option, open(src, 'rb').read(), addon, dial)
 
     os.makedirs(out_dir, exist_ok=True)
-    dst = os.path.join(out_dir, f'm8-{version.replace(".", "_")}-{option}{"-" + addon if addon else ""}.upd')
+    dst = os.path.join(out_dir, f'm8-{version.replace(".", "_")}-{option}'
+                                f'{"-" + addon if addon else ""}{"-dial" if dial else ""}.upd')
     if os.path.exists(dst):
         fail(f'{dst} already exists; not overwriting it. Move or delete it first.')
     with open(dst, 'xb') as f:                      # 'x' = create only, never replace a file
@@ -227,11 +258,14 @@ Next (needs a build made with --profiles):
              'info': '\n  6. INFO in shooting mode shows Camera stats; INFO or SET closes it.',
              'profiles': '\n  6. INFO in shooting mode shows Camera stats; UP opens the profile list (make the'
                          '\n     card folder with: python3 m8patch.py profiles <stock file> <your .ncp files>).'}[addon]
-    print(f"""m8patch v{VERSION} -- {OPTIONS[option]}{ADDON_TEXT.get(addon, '')}
+    if dial:
+        after += (f'\n  {7 if addon else 6}. In shooting mode, turn the rear dial: exposure compensation changes by 1/3 EV'
+                  '\n     per click and shows on the screen; it closes after 2 s or with SET. The value stays set.')
+    print(f"""m8patch v{VERSION} -- {OPTIONS[option]}{ADDON_TEXT.get(addon, '')}{DIAL_TEXT if dial else ''}
   input:   {src}  (stock {version}, unchanged)
   output:  {dst}
   SHA-256: {sha}
-  status:  matches the author's build, {status}
+  status:  matches the author's build: {status}
 
 Next (README "Flash it" and "Safety and recovery"):
   1. Charge the battery fully. Keep a separate card holding only your stock {version} file.
