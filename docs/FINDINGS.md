@@ -5,6 +5,16 @@ are marked **[tested]**.
 
 ## Hardware results
 
+- **2026-11-04 [independent camera test]** Option 2 `dng` build
+  (`55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c`) flashed
+  successfully on another M8. `JPG fine+RAW` appeared in SET → Compression and persisted
+  after a power cycle. A JPG+raw capture produced a 21,049,052-byte DNG copy with 35 IFD0
+  tags; LibRaw decoded it at 3976 × 2646, and its date, ISO and exposure matched the JPG.
+- **2026-11-04 [independent camera test]** Option 2 `dng --dial-ev` build
+  (`31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074`) flashed
+  successfully on another M8. The rear-dial exposure compensation worked. Three JPG+RAW
+  pairs at −2, 0 and +2 EV were saved. Each `.RAW` decoded as a 3976 × 2646 DNG with 35
+  IFD0 tags; capture date, ISO, exposure time and exposure bias matched its JPG.
 - **2026-10-19 [tested]** Patched 2.014 (`f6589c41…`) flashed on the author's M8 (was stock 2.014).
   Update ran normally (progress bar paused around 60%, then completed) and asked for a restart.
   Camera boots normally; SET → Compression lists JPG fine+RAW; selection survives power-off
