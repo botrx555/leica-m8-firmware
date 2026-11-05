@@ -5,6 +5,9 @@ Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't 
 
 ## Unreleased
 
+- `dng --dial-ev` (`31c1ac63…`) has now been flashed and tested as that exact file, and `dng`
+  (`55264b11…`) tested again, on a second M8 by vcs222 (2026-11-04, PR #6). `m8patch.py` and the
+  README "Builds" table say so.
 - Developers: builds are made from pieces with the same flags as `m8patch.py`
   (`tools/m8_dngpatch.py … dng --profiles --dial-ev`), and each piece's camera test is recorded
   (`TESTED_PIECES`). The numbered "stages" are kept only as history: the diagnostic builds under

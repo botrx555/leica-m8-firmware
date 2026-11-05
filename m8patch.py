@@ -73,7 +73,8 @@ TESTED = {
     ('dng', '2.014', 'info', True): ('02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5', PIECES),
     ('raw-menu', '2.014', 'info', True): ('2181425138fec847e607d777afaae493df68a35658e8aac55934c407d46947c1',
                                           PIECES),
-    ('dng', '2.014', None, True): ('31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074', PIECES),
+    ('dng', '2.014', None, True): ('31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074',
+                                   EXACT.format('2026-11-04, on a second M8')),
     ('raw-menu', '2.014', None, True): ('823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25',
                                         PIECES),
 }

@@ -19,7 +19,9 @@ Optional add-ons for either option (experimental):
 - **Exposure compensation on the rear dial** (`--dial-ev`): turn the dial in shooting mode instead
   of going through the SET menu. Combines with either of the above.
 
-> **Status: tested on one camera.** Both patches and every add-on run on the author's M8 with firmware 2.014. They are
+> **Status: tested on the author's camera; Option 2 also on a second M8.** Both patches and every add-on run on the
+> author's M8 with firmware 2.014, and Option 2 with and without `--dial-ev` was tested independently on another
+> M8. They are
 > experimental, not affiliated with or endorsed by Leica, and flashing modified firmware is at your
 > own risk. Read [Safety and recovery](#safety-and-recovery) before flashing anything.
 
@@ -250,14 +252,16 @@ file.
 | Option 1 + `--dial-ev` | `823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25` | pieces |
 | Option 1 + `--info --dial-ev` | `2181425138fec847e607d777afaae493df68a35658e8aac55934c407d46947c1` | pieces |
 | Option 1 + `--profiles --dial-ev` | `0776bad421170ca9a2dae0ebbbd956282e1821bd8ef7e587cabad43053d25b9d` | pieces |
-| Option 2 | `55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c` | exact |
+| Option 2 | `55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c` | exact (two M8s) |
 | Option 2 + `--info` | `32e6854ec0bc451667ef4f8f6b40dfb4c8af406a43db84e94b90abeb380408f8` | exact |
 | Option 2 + `--profiles` | `d7a17ef25309af7780f24bc2bf240bfd8e68cb6e4edb6aa0845e07524d273b14` | exact |
-| Option 2 + `--dial-ev` | `31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074` | pieces |
+| Option 2 + `--dial-ev` | `31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074` | exact (second M8) |
 | Option 2 + `--info --dial-ev` | `02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5` | pieces |
 | Option 2 + `--profiles --dial-ev` | `1254b7430a492c9197f2c4bb812bdd9a11e7d3b6a97fb043f245274b4fa07dfa` | exact |
 
-If you flash a *pieces* build, please report how it went (option, add-ons, SHA-256) in an issue.
+"Second M8" / "two M8s": also flashed and tested by vcs222 on another camera (2026-11-04,
+[FINDINGS](docs/FINDINGS.md#hardware-results)). If you flash a *pieces* build, please report how it went
+(option, add-ons, SHA-256) in an issue.
 
 ## Flash it
 
@@ -312,8 +316,9 @@ camera to Leica for service, reflash stock.
 
 ## Known limitations
 
-- **Tested on one camera.** Single shots, power cycles, and continuous shooting until the buffer
-  fills (on Option 1) are tested; Option 2 hasn't had the full burst test yet.
+- **Tested on two cameras so far** (the author's, and Option 2 / `dng --dial-ev` on a second M8).
+  Single shots, power cycles, and continuous shooting until the buffer fills (on Option 1) are
+  tested; Option 2 hasn't had the full burst test yet.
 - **Option 2's files are named `.RAW`, not `.DNG`.** A build that names them `.DNG` exists (stage 5,
   for developers), but on the camera, review of a JPG + `.DNG` pair then shows only the DNG's file
   name and can't reach the JPG, because these DNGs have no embedded preview. Keeping `.RAW` keeps
