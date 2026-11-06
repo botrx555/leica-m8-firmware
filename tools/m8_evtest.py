@@ -198,7 +198,7 @@ def main():
               ('call', 'timer_stop', 'app+0x2534C', '0x0')]
     unknown = set()
     pxas = {}
-    for option, screen, dial, meta in [b + (False,) for b in d.BUILDS] + d.META_BUILDS:
+    for option, screen, dial, meta in d.BUILDS:
         if not dial:
             continue
         region = SCREEN_REGION[screen]
@@ -239,7 +239,7 @@ def main():
                 res.check(f'{n}, {state}, `{chr(key)}`: as base, then step, open as INFO does, arm the timer',
                           (tn[:-1], tn[-1] == tb[-1]), (want, True))
 
-    pxa = pxas['dng', 'profiles', False]      # the camera-tested build (old stage 15)
+    pxa = pxas['dng', 'info', True]           # dng --meta --info --dial-ev (ev piece as camera-tested in 1254b743)
     # ---- 2. keys while the page is open
     bad = []
     for key in range(256):

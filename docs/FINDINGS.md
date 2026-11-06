@@ -5,6 +5,14 @@ are marked **[tested]**.
 
 ## Hardware results
 
+- **2026-11-06 [tested]** `m8patch.py --info --dial-ev` = `dng --meta --info --dial-ev`
+  (`4382b20c1e36e8c1b0fba0a4871e4391154b789f584f23785924690adc86bbe7`) flashed on the author's M8
+  (was `4359b04b…`). This is the first exact-tested build of the simplified set: 1 base + `--info` / `--dial-ev`.
+  - L1032101–02 (ISO 320): AsShotNeutral and 18/18 MakerNote tags == the JPG; 35 IFD0 tags; image
+    data normal.
+  - Owner report: INFO Camera stats and the dial work as expected.
+- **2026-11-05/06 [tested]** `dng --meta --profiles --dial-ev` (`4359b04b…`): per-shot white balance +
+  MakerNote, auto / Tungsten / long exposure with .BIA (details: "`--meta` with the fetch").
 - **2026-11-04 [independent camera test]** Option 2 `dng` build
   (`55264b11f86dd66e61f1412c5c341afdaa8553ce0d10ade270e52de1f24c944c`) flashed
   successfully on another M8. `JPG fine+RAW` appeared in SET → Compression and persisted

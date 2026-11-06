@@ -11,9 +11,13 @@ m8_rawpatch.py; the result must be Option 1, the flashed build f6589c41...), the
   dial     --dial-ev (ev, ev key, ev held, ev timer)
   meta     --meta, dng only (tiff, meta, meta code, meta hook, meta fetch instead of dng's pieces)
 
-That is 12 builds (BUILDS) plus 6 with --meta (META_BUILDS). Each piece has been tested on a camera (TESTED_PIECES: the flashed
-build and date); a build may ship when all its pieces are camera-tested (owner's decision
-2026-11-02; tools/m8_combotest.py checks every build carries each piece byte for byte as tested).
+m8patch.py offers 4 builds (BUILDS, since 2026-11-06, owner's decision): one base = dng --meta
+(persistent RAW + in-camera DNG + white balance and MakerNote), with --info and/or --dial-ev.
+Every combination ever offered (ALL_BUILDS: 12 up to v0.6.0, plus 6 --meta in v0.7.0) can still be
+built; the camera-tested references are among them. Each piece has been tested on a camera
+(TESTED_PIECES: the flashed build and date); a build may ship when all its pieces are camera-tested
+(owner's decision 2026-11-02; tools/m8_combotest.py checks every offered build carries each piece
+byte for byte as tested).
 
 History (no new numbers are added): builds used to be numbered "stages". Diagnostic and one-off
 builds keep their numbers (HISTORY, `--stage N`):
@@ -38,8 +42,8 @@ Pieces (each in one declared region, REGIONS):
   meta hook  0x3C6A8 b 0x3C5EC -> bl 0x26DA0
   meta fetch 0x3CB98 bne 0x3CC70 -> b 0x26F98 (raw_fetch in meta code): a RAW file (not .BIA) takes
           the DNG's path through 0x3B430 first, so the per-shot neutral is in the job before the RAW
-          (`dng --meta` = tiff, meta, meta code, meta hook, meta fetch; META_BUILDS: 6 more builds,
-          camera-tested as dng --meta --profiles --dial-ev 4359b04b, 2026-11-05)
+          (`dng --meta` = tiff, meta, meta code, meta hook, meta fetch; the base of every offered
+          build; camera-tested as dng --meta --profiles --dial-ev 4359b04b, 2026-11-05)
   ext     0x3CFF8 store routine's "RAW" literal 0xD6590 -> "DNG" 0xD6570 (only reader: 0x3CCE0)
   info    0x2ABD0-0x2AF90 bf_memtest1 debug command -> stub returning 0 + info_open
           (tools/asm/m8_info.s), rest undefined fill
@@ -650,9 +654,12 @@ HISTORY = {
 OPTION_PIECES = {'raw-menu': [], 'dng': ['tiff', 'ldimg', 'hook']}
 SCREEN_PIECES = {None: [], 'info': ['stats', 'stats key'], 'profiles': ['picker', 'picker key']}
 DIAL_PIECES = ['ev', 'ev key', 'ev held', 'ev timer']
-BUILDS = [(o, sc, dl) for o in ('raw-menu', 'dng') for sc in (None, 'info', 'profiles') for dl in (False, True)]
-# dng --meta (per-shot WB + Leica MakerNote): (option, screen, dial, meta); m8patch.py offers them too
-META_BUILDS = [('dng', sc, dl, True) for sc in (None, 'info', 'profiles') for dl in (False, True)]
+# (option, screen, dial, meta). Every combination m8patch.py has offered: 12 up to v0.6.0, 6 with --meta in v0.7.0
+ALL_BUILDS = ([(o, sc, dl, False) for o in ('raw-menu', 'dng') for sc in (None, 'info', 'profiles') for dl in (False, True)] +
+              [('dng', sc, dl, True) for sc in (None, 'info', 'profiles') for dl in (False, True)])
+# Offered since 2026-11-06 (owner's decision): one base (raw-menu + dng + --meta), add-ons --info, --dial-ev.
+# --profiles is out until the picker is reworked (work in progress); raw-menu and dng without --meta too.
+BUILDS = [('dng', sc, dl, True) for sc in (None, 'info') for dl in (False, True)]
 # piece -> (pieces, flashed build it was camera-tested in, date)
 TESTED_PIECES = {
     'raw-menu': ([], 'f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396', '2026-10-19'),
@@ -754,7 +761,9 @@ KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
     '624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8':
         'dng --meta --info; m8_savetest, m8_combotest; not flashed; every piece camera-tested',
     '4382b20c1e36e8c1b0fba0a4871e4391154b789f584f23785924690adc86bbe7':
-        'dng --meta --info --dial-ev; m8_savetest, m8_combotest, m8_evtest; not flashed; every piece camera-tested',
+        'dng --meta --info --dial-ev; m8_savetest, m8_combotest, m8_evtest; flashed and camera-tested 2026-11-06 '
+        '(L1032101-02: AsShotNeutral and 18/18 MakerNote tags == the JPG, image data normal; owner report: '
+        'INFO Camera stats and the dial work)',
     'a0161ed4991003134afd8a6dbcebbe2529dfddec3b3af02f46c2cc3c6e9c754f':
         'dng --meta --profiles; m8_savetest, m8_combotest; not flashed; every piece camera-tested',
     '823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25':

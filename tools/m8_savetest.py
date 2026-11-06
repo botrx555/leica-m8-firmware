@@ -32,7 +32,8 @@ settings loader/menu unchanged (m8_emutest), declared-regions diff (m8_dngpatch)
 
 Usage:  work/venv/bin/python tools/m8_savetest.py [--build raw-menu|dng [--meta] [--info|--profiles] [--dial-ev]]
                                                   [--stage N] [--quick] [-v]
-        (default: the 12 builds, the 6 dng --meta builds + the diagnostic builds 1, 2, 3, 5 (canary, idle, dump, .DNG names);
+        (default: the 4 offered builds, dng --meta [--info] [--dial-ev], + the diagnostic builds 1, 2,
+        3, 5 (canary, idle, dump, .DNG names); --build: any build, also earlier ones;
         --stage N: a history / old stage number; --quick = one sample, one drain policy)
 """
 import hashlib, os, struct, sys, time
@@ -391,7 +392,7 @@ def main():
     quick = '--quick' in sys.argv
     # targets: (label, pieces, title)
     targets = [(dp.build_name(*b), dp.build_pieces(*b), 'build ' + dp.build_name(*b))
-               for b in dp.BUILDS + dp.META_BUILDS]
+               for b in dp.BUILDS]
     targets += [(f'stage{n}', dp.HISTORY[n][1], f'stage {n}: {dp.HISTORY[n][0]}') for n in (1, 2, 3, 5)]
     if '--stage' in sys.argv:
         n = int(sys.argv[sys.argv.index('--stage') + 1])

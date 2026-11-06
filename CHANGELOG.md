@@ -3,6 +3,28 @@
 Versions of this project (not Leica firmware versions). Every build is for Leica M8 firmware **2.014**.
 Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't flash it.
 
+## v0.8.0 — 2026-11-06
+
+- **Simpler: one build, two add-ons.** The persistent RAW menu, the in-camera 14-bit DNG and the
+  camera's white balance + Leica MakerNote (v0.7.0's `dng --meta`) are now one build:
+  `python3 m8patch.py m8-2_014.upd [--info] [--dial-ev]`. 4 builds instead of 18; the output is
+  `build/m8-2_014-patched[-info][-dial].upd`. The files open in Lightroom as before, and m8raw2dng2
+  still converts them.
+- No longer offered: Option 1 alone (`raw-menu`), the DNG without white balance (`dng` without
+  `--meta`), and the picture-profile picker (`--profiles`, and `m8patch.py profiles`). The picker
+  is a work in progress (README); its tools stay in `tools/`. Earlier hashes stay below.
+- The four builds are byte-identical to v0.7.0's `dng --meta [--info] [--dial-ev]` (same hashes).
+  `--info --dial-ev` (`4382b20c…`) was flashed and camera-tested as that exact file on 2026-11-06.
+- Developers: `m8_dngpatch.BUILDS` = the 4 offered builds, `ALL_BUILDS` = every earlier one;
+  combotest, evtest and savetest test the 4 by default (`--build` still takes any).
+
+| Build | SHA-256 | On a camera |
+|---|---|---|
+| the build | `9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04` | pieces |
+| + `--info` | `624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8` | pieces |
+| + `--dial-ev` | `bd914f4db75ab311f852acae81088e8250fe6ed90a093c89567d96e20708122a` | pieces |
+| + `--info --dial-ev` | `4382b20c1e36e8c1b0fba0a4871e4391154b789f584f23785924690adc86bbe7` | exact file (2026-11-06) |
+
 ## v0.7.0 — 2026-11-06
 
 - `dng --dial-ev` (`31c1ac63…`) has now been flashed and tested as that exact file, and `dng`

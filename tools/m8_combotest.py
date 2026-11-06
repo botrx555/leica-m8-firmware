@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Check every m8patch.py combination (base x screen add-on x dial = 12 builds, plus dng --meta x
-screen add-on x dial = 6) against the rule
+Check every m8patch.py build (the base dng --meta, with --info and/or --dial-ev = 4 builds) against
+the rule
 "each piece tested on a camera" (README "Builds"; owner's decision 2026-11-02).
 
 Each build is made through m8patch.build() -- the path a user runs -- and must:
@@ -38,8 +38,7 @@ def main():
     stock = open(os.path.join(ROOT, 'firmware/stock/m8-2_014.upd'), 'rb').read()
     option1 = d.flashed_file(stock)
     refs, PIECES = {}, {}
-    builds = [b + (False,) for b in d.BUILDS] + d.META_BUILDS        # (option, screen, dial, meta)
-    known = {hashlib.sha256(d.build_file(stock, *b)[1]).hexdigest(): b for b in builds}
+    known = {hashlib.sha256(d.build_file(stock, *b)[1]).hexdigest(): b for b in d.ALL_BUILDS}
     for p, (names, sha, date) in d.TESTED_PIECES.items():
         if not names:
             continue
@@ -48,12 +47,12 @@ def main():
         res.check(f'reference for {p}: {sha[:8]} is a camera-tested build ({date})', 'flashed and camera-tested'
                   in d.KNOWN_OUTPUTS.get(sha, ''), True)
         res.check(f'reference for {p}: contains the piece', set(names) <= set(d.build_pieces(*known[sha])), True)
-    res.check('18 builds', (len(builds), sorted(builds, key=str) == sorted(
-        [(o, sc, dl, mt) for (o, _, sc, dl, mt) in m8patch.TESTED], key=str)), (18, True))
-    for option, screen, dial, meta in builds:
+    res.check('4 builds, the same in m8patch.TESTED', (len(d.BUILDS), sorted(d.BUILDS, key=str) == sorted(
+        [('dng', sc, dl, True) for (_, sc, dl) in m8patch.TESTED], key=str)), (4, True))
+    for option, screen, dial, meta in d.BUILDS:
         name = d.build_name(option, screen, dial, meta)
-        _, out, status = m8patch.build(option, stock, screen, dial, meta)
-        want = m8patch.TESTED[option, '2.014', screen, dial, meta][0]
+        _, out, status = m8patch.build(stock, screen, dial)
+        want = m8patch.TESTED['2.014', screen, dial][0]
         res.check(f'{name}: SHA-256 as in TESTED', hashlib.sha256(out).hexdigest(), want)
         res.check(f'{name}: == m8_dngpatch.build_file', out == d.build_file(stock, option, screen, dial, meta)[1],
                   True)
