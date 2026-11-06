@@ -23,7 +23,9 @@ is. `.DNG` names (old stage 5) broke in-camera review, so the files stay `.RAW`.
 **Offered builds (owner's decision 2026-11-06): one base = `dng --meta` (RAW menu + DNG + WB/MakerNote),
 add-ons `--info`, `--dial-ev` → 4 builds (`m8_dngpatch.BUILDS`).** `raw-menu`, `dng` without `--meta` and
 `--profiles` are no longer offered (the picker is a work in progress: owner doesn't like how it works);
-they stay buildable for history (`ALL_BUILDS`, 18 earlier combinations). **Owner's decision 2026-11-02:
+they stay buildable for history (`ALL_BUILDS`, 18 earlier combinations). **RAW-only / PLAY of our DNG
+(`dng --play`, `352964b7…`) = work in progress**: flashed 2026-11-06, PLAY drew lines / a purple image,
+rolled back (owner: our original approach works; FINDINGS "`dng --play` test build"). **Owner's decision 2026-11-02:
 a build may ship when every piece is camera-tested**, pieces byte-identical to those builds and regions disjoint (`tools/m8_combotest.py`).
 A new or changed piece needs its own camera test. **Author's camera: `m8patch.py --info --dial-ev` = `dng --meta --info --dial-ev`
 (`4382b20c…`, since 2026-11-06, camera-tested); roll back to `dng --meta --profiles --dial-ev` (`4359b04b…`).**

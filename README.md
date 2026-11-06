@@ -36,6 +36,7 @@ and refuses anything else.
 - [Safety and recovery](#safety-and-recovery)
 - [Known limitations](#known-limitations)
 - [Work in progress: picture profiles](#work-in-progress-picture-profiles)
+- [Work in progress: RAW-only shooting](#work-in-progress-raw-only-shooting)
 - [How it works](#how-it-works)
 - [For developers](#for-developers)
 - [Testing without a camera](#testing-without-a-camera)
@@ -283,6 +284,16 @@ curve points into card files), `tools/m8_curvesim.py` (previews a curve on your 
 notes in [FINDINGS "JPG tone curves"](docs/FINDINGS.md#jpg-tone-curves-and-picture-profiles-from-the-card-static-2026-10-23-research-only).
 The `.LUT` files these tools make contain Leica data taken from your stock file, so keep them for
 yourself, like the firmware.
+
+## Work in progress: RAW-only shooting
+
+Someone asked for saving only the RAW file (no JPG), to write faster. For that the camera's PLAY
+button would have to show our DNGs. The research showed PLAY reads a DNG's raw data itself, and a
+test build in the layout PLAY expects got that far: PLAY opened the files, but drew horizontal lines
+and a washed-out purple image instead of the picture. The camera's display code seems to expect its
+own raw format (smaller frame, 8-bit, black level removed), which our untouched 14-bit data isn't.
+So RAW-only isn't offered; the builds keep writing the JPG next to the DNG. The notes are in
+[FINDINGS "How PLAY reads a DNG"](docs/FINDINGS.md#how-play-reads-a-dng-static-2026-11-06-research-for-raw-only).
 
 ## How it works
 

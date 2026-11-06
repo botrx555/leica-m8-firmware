@@ -70,6 +70,7 @@ HEADER = dp.REGIONS['header']
 NEW_CODE = (0x28AB0, dp.TABLES)
 META_CODE = dp.REGIONS['jpgipp']
 META_LITERAL = META_CODE[0] + dp.META_CODE.index(struct.pack('<I', dp.META_TABLES))   # meta_hook's `ldr r8, =TABLES`
+PLAY_LITERAL = META_CODE[0] + dp.PLAY_CODE.index(struct.pack('<I', dp.META_TABLES))   # the same in --play's code
 TRAIL_OFF = HDR + (ROWS - 1) * ROW_BYTES     # file offset of the trailing sensor row (IFD0)
 DMA_BUF, DMA_PARITY = 0x026F44E0, 0x3E080   # CPU view of the DMA target (phys 0xA26F44E0)
 PHYS = 0xA0000000                            # SDRAM physical base; CPU address = phys - PHYS
@@ -256,13 +257,25 @@ MAKER = wd.tiff_maker(wd.jpg_tiff(os.path.join(ROOT, 'sampleraws/L1031902.JPG'))
 
 
 JOB_DEFAULT_WB = struct.pack('<6I', 7000, 10000, 10000, 10000, 7000, 10000)   # job+0xD0 before 0x3B430
+# --play: the review image 0x3B430 leaves in buffer [job+0x26C] (stand-in: the sample JPG at 320x240)
+REVIEW_BUF, REVIEW_SIZE, REVIEW_DONE = 0x24C1CE0, 0x38400, 0x169BD4
+from PIL import Image
+REVIEW_IMG = Image.open(os.path.join(ROOT, 'sampleraws/L1031902.JPG')).convert('RGB').resize(
+    (wd.REVIEW_W, wd.REVIEW_H), Image.BOX).tobytes()
+
+
+def put_review(e, idx, done=True):
+    e.uc.mem_write(REVIEW_BUF + idx * REVIEW_SIZE, REVIEW_IMG)
+    e.uc.mem_write(REVIEW_DONE + idx, bytes([done]))
 
 
 def wb_fetch(e, job, kind, _):
     """0x3B430(job, kind): the neutral as the Blackfin returns it (the sample JPG's 0x322-0x324)."""
     assert (job, kind) == (JOB, 0), f'0x3B430({job:#x}, {kind})'
     e.uc.mem_write(JOB + 0xD0, b''.join(MAKER[t][1] for t in (0x322, 0x323, 0x324)))
-    return 0x24C1CE0                            # review image (the RAW path ignores it)
+    idx = e.u32(JOB + 0x26C)
+    put_review(e, idx)
+    return REVIEW_BUF + idx * REVIEW_SIZE       # review image (the RAW path ignores it)
 
 
 def fill_shot(e, iso=None, maker=MAKER):
@@ -296,22 +309,26 @@ def expected(pieces, raw, e, iso=None):
             e.read(e.u32(et.P_SETTINGS), 0x200)
         out[TRAIL_OFF:TRAIL_OFF + len(dump)] = dump
     if 'tiff' in pieces:
-        t, slots = dp.meta_template() if 'meta' in pieces else dp.template()
+        play = 'play' in pieces
+        t, slots = dp.play_template() if play else dp.meta_template() if 'meta' in pieces else dp.template()
         shot = {k: v for k, v in SHOT.items() if k in dict(
             (n, 1) for n, *_ in dp.slot_table())}
         if iso is not None:
             shot['ISO'] = iso
         shot['BlackLevel'] = wd.black_for_iso(shot['ISO'])
-        if 'meta' in pieces:                              # MakerNote + AsShotNeutral from the JPG's values
+        if 'meta' in pieces or play:                      # MakerNote + AsShotNeutral from the JPG's values
             t = wd.fill_maker(t, slots, MAKER)
         out = bytearray(wd.wrap(raw, t, slots, shot))
-        if 'meta' in pieces:                              # job+0..0x280 behind the template
+        if play:                                          # IFD0 image: sampled from the review image
+            off, n, _ = slots['Thumbnail']
+            out[TRAIL_OFF + off:TRAIL_OFF + off + n] = wd.thumbnail(REVIEW_IMG)
+        elif 'meta' in pieces:                            # job+0..0x280 behind the template
             out[TRAIL_OFF + dp.DUMP_AT:TRAIL_OFF + dp.DUMP_AT + dp.DUMP_LEN] = e.read(JOB, dp.DUMP_LEN)
     return bytes(out)
 
 
 def run_hook(pxa, size, idx, bia=False, row_bytes=ROW_BYTES, rows=ROWS, iso=None, maker=MAKER,
-             entry=dp.HOOK_ENTRY):
+             entry=dp.HOOK_ENTRY, review=None):
     """Call dng_hook directly as the producer's `bl` would; returns (emu, regs preserved?)."""
     from unicorn.arm_const import (UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7,
                                    UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11,
@@ -323,6 +340,10 @@ def run_hook(pxa, size, idx, bia=False, row_bytes=ROW_BYTES, rows=ROWS, iso=None
     e.w32(CTX + 0x4228, row_bytes)
     e.w32(CTX + 0x422C, rows)
     fill_shot(e, iso, maker)
+    if review is not None:                      # (review buffer index, review-done byte)
+        e.w32(JOB + 0x26C, review[0])
+        if review[0] < 10:
+            put_review(e, review[0], review[1])
     keep = [UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9,
             UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_SP]
     vals = [CTX, 0x5555, 0x6666, size, 0x8888, 0x9999, 0xAAAA, 0xBBBB, et.STACK + 0xF000]
@@ -400,14 +421,15 @@ def main():
     if '--build' in sys.argv:
         i = sys.argv.index('--build') + 1
         flags = []
-        while i < len(sys.argv) and sys.argv[i] in ('raw-menu', 'dng', '--meta', '--info', '--profiles', '--dial-ev'):
+        while i < len(sys.argv) and sys.argv[i] in ('raw-menu', 'dng', '--meta', '--play', '--info', '--profiles', '--dial-ev'):
             flags.append(sys.argv[i])
             i += 1
         option = [f for f in flags if not f.startswith('--')]
         screen = [f[2:] for f in flags if f in ('--info', '--profiles')]
         if len(option) != 1 or len(screen) > 1:
             raise SystemExit(__doc__)
-        b = (option[0], screen[0] if screen else None, '--dial-ev' in flags, '--meta' in flags)
+        b = (option[0], screen[0] if screen else None, '--dial-ev' in flags,
+             'play' if '--play' in flags else '--meta' in flags)
         targets = [(dp.build_name(*b), dp.build_pieces(*b), 'build ' + dp.build_name(*b))]
     R = et.Results(verbose)
     stock_upd = open(os.path.join(ROOT, 'firmware/stock/m8-2_014.upd'), 'rb').read()
@@ -456,21 +478,24 @@ def main():
     R.check('frozen code == reassembled tools/asm sources',
             (m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_header.s')) == dp.HEADER_TIFF,
              m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_dnghook.s')) == dp.HOOK_CODE,
-             m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_dngmeta.s')) == dp.META_CODE), (True, True, True))
+             m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_dngmeta.s')) == dp.META_CODE,
+             m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_dngplay.s')) == dp.PLAY_CODE), (True,) * 4)
     R.check('branches/pointers into the new code (flashed build)',
             [hex(a) for a in branches_into(flashed, *NEW_CODE)], ['0x2dd48'])
     bia_ref = save(flashed, raws[samples[0]], 'eager', bia=True)
 
     for b, pieces, title in targets:
         pxa = builds[b]
-        meta = 'meta' in pieces
+        play = 'play' in pieces
+        meta = 'meta' in pieces or play
         hooked = 'hook' in pieces or meta
+        tpl = dp.play_template() if play else dp.meta_template() if meta else dp.template()
         print(title)
         R.check(f'{b} branches/pointers into the header block',
                 [hex(a) for a in branches_into(pxa, *HEADER)], ['0x3cd58'])
         R.check(f'{b} branches/pointers into the new code',
                 [hex(a) for a in branches_into(pxa, *NEW_CODE)],
-                sorted(['0x2dd48'] + ['0x3c6a8'] * (hooked and not meta) + [hex(META_LITERAL)] * meta))
+                sorted(['0x2dd48'] + ['0x3c6a8'] * (hooked and not meta) + [hex(PLAY_LITERAL if play else META_LITERAL)] * meta))
         R.check(f'{b} branches/pointers into writejpgipp',
                 [hex(a) for a in branches_into(pxa, *META_CODE)], ['0x2db8c'] + ['0x3c6a8', '0x3cb98'] * meta)
         ext = b'DNG' if 'ext' in pieces else b'RAW'
@@ -498,7 +523,8 @@ def main():
                             (e.blocks, e.spos, e.done) == (f.blocks, f.spos, f.done), True)
                     if 'tiff' in pieces:
                         t = wd.check(out, raw)
-                        R.check(f'{b} DNG structure check (m8_wrapdng.check): IFD0 tags', t, 35)
+                        R.check(f'{b} DNG structure check (m8_wrapdng.check): IFD0 tags', t,
+                                struct.unpack_from('<H', tpl[0])[0] if play else 35)
                     if meta:
                         R.check(f'{b} DNG MakerNote == the JPG\'s (18 tags, type and value)',
                                 wd.tiff_maker(out) == MAKER and len(MAKER) == 18, True)
@@ -538,7 +564,7 @@ def main():
                         (kept, bool(dma), outside(e.new_writes, dst, dst + ROW_BYTES)), (True, writes, []))
         # BlackLevel per ISO (mode 2): dng_hook called directly, value read from the trailing row
         if 'ldimg' in pieces or meta:
-            boff = dp.black_table()[0]
+            boff = tpl[1]['BlackLevel'][0] if meta else dp.black_table()[0]
             bad = []
             for iso in (0, 100, 160, 226, 227, 320, 452, 453, 640, 905, 906, 1250, 1810, 1811, 2500, 6400):
                 e, kept = run_hook(pxa, 7 * ROW_BYTES, 165, iso=iso, entry=entry)
@@ -549,7 +575,7 @@ def main():
         # AsShotNeutral (--meta): the camera's neutral only in 0x3B430's form (16384/r, 16384/16384,
         # 16384/b, r and b non-zero); anything else (job default, a zero, another scale): daylight
         if meta:
-            woff = dp.meta_template()[1]['AsShotNeutral'][0]
+            woff = tpl[1]['AsShotNeutral'][0]
             wb = list(struct.unpack('<6I', b''.join(MAKER[t][1] for t in (0x322, 0x323, 0x324))))
             day = [x for r in wd.DAYLIGHT_NEUTRAL for x in r]
             cases = [('the JPG\'s neutral', wb, True),
@@ -565,6 +591,20 @@ def main():
                 got = list(struct.unpack('<6I', e.read(trail_dest(165) + woff, 24)))
                 R.check(f'{b} AsShotNeutral, {label}: ' + ('camera neutral' if camera else 'daylight'),
                         (kept, got), (True, words if camera else day))
+        # IFD0 image (--play): every 8th pixel / row of review buffer [job+0x26C], only if its review-done
+        # byte is set and the index is a buffer (0..9); otherwise nothing is written there (stays black)
+        if play:
+            toff, tn, _ = tpl[1]['Thumbnail']
+            dst = trail_dest(165)
+            for label, review, want in [('buffer 0', (0, 1), True), ('buffer 9', (9, 1), True),
+                                        ('review-done byte 0', (3, 0), False), ('index 10', (10, 1), False),
+                                        ('index 0xFFFFFFFF', (0xFFFFFFFF, 1), False)]:
+                e, kept = run_hook(pxa, 7 * ROW_BYTES, 165, entry=entry, review=review)
+                got = e.read(dst + toff, tn)
+                R.check(f'{b} IFD0 image, {label}: regs kept, ' + ('== review image sampled' if want else 'not written')
+                        + ', writes inside the trailing row',
+                        (kept, got == (wd.thumbnail(REVIEW_IMG) if want else bytes(tn)),
+                         outside(e.new_writes, dst, dst + ROW_BYTES)), (True, True, []))
         if 'tiff' in pieces:
             raw = raws[samples[0]]
             e = save(pxa, raw, 'eager', iso=1250)

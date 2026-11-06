@@ -411,7 +411,8 @@ stage 3 checks the real offsets on the camera).
   MakerNote** (220 bytes, "LEICA" header 0xE1080, Leica tags 0x302–0x340), FileSource, SceneType,
   WhiteBalance, DigitalZoom, FocalLength35, SceneCapture, ImageUniqueID.
   Readers (playback): 0x6CC64 (vtable A) and 0x6DDAC/0x6DB74 (vtable B) — they *get* tags into a
-  playback object; not useful for writing.
+  playback object; not useful for writing. (2026-11-06: 0x6CBB4 / 0x6CC60 / 0x6CF64 are the DNG class's
+  readers too, see "How PLAY reads a DNG".)
 - **Metadata struct S** (writer takes it from `[writer+0xB0]`), values already EXIF-ready (the writer
   copies them straight into tags): +0x20 date "YYYY:MM:DD HH:MM:SS" (20 bytes) — **in the job copy
   the date is at job+0x20 = S+0x1C (camera-verified 2026-10-20); the other offsets below are
@@ -457,6 +458,120 @@ stage 3 checks the real offsets on the camera).
   display path per file by extension ("JPG" → 0x46198, "DNG" → 0x460C8); pair grouping in the file
   list not traced. The DNG reader still runs for a lone DNG (JPG deleted elsewhere) and maybe the
   info screen ("DNG + %s", 0x47574) — keep the emulator test before the rename.
+
+## How PLAY reads a DNG (static, 2026-11-06, research for RAW-only)
+
+Question: can PLAY show our 14-bit file (named `.DNG`) when no JPG is written?
+- **Loader:** playback image task 0x46354 picks the path by extension (obj+0xA530):
+  - "JPG" → 0x45FD0 → JPEG decoder 0x70764;
+  - "DNG" → 0x46200: takes the shared file buffer (0x20F18, size 0x2100000), reads the **raw image** in
+    row chunks (0x45E6C → TIFF class 0x7886C), calls a progress callback (ctx+0x4210), then 0x45DB8
+    (develop/display, not traced yet).
+
+  **So PLAY develops a DNG from its raw data. The 320×240 RGB image isn't what's displayed.**
+- **TIFF reader class** (vtable 0xED9E4; open 0x77A84 reads the first 4 KB, parse 0x7796C). Any
+  failure clears obj+0x266, and the file then shows by name only (stage 5).
+  - **0x77020 header:** "II", 42; IFD0 offset → +0x58.
+  - **0x77518 IFD0** must be an **8-bit RGB image**:
+    - NewSubFileType (0xFE) present, ≤ 1;
+    - width / height → +4 / +8 (no fixed size checked; +0xC = w·h·3);
+    - BitsPerSample 8,8,8; Compression 1; Photometric 2 (RGB); SamplesPerPixel 3; PlanarConfig 1;
+    - strips → +0x18 / +0x24 / +0x10 / +0x14.
+
+    It also takes SubIFDs (0x14A) → +0x5C and ExifIFD (0x8769) → +0x60 (both required later), and
+    DateTimeOriginal (20 bytes).
+  - **0x76FAC:** parses the EXIF IFD (+0x60).
+  - **0x77098 raw IFD (+0x5C, the SubIFD):**
+    - width / height → +0x2C / +0x30; **BitsPerSample 8 or 16**; Compression 1; **Photometric 32803
+      (CFA)**; SamplesPerPixel 1; PlanarConfig 1;
+    - StripOffsets / RowsPerStrip / StripByteCounts: several strips OK;
+    - LinearizationTable (0xC618) optional: if present, 256 SHORTs → +0x66 and the data is 8-bit;
+      **if absent, the data must be 16-bit** (+0x50 = bytes per sample ≠ 1);
+    - WhiteLevel (0xC61D) optional, must equal [0xE5990] = **16383**.
+
+    **16-bit raw with no table is a supported format**, which is ours (BitsPerSample 16, WhiteLevel
+    16383).
+- **Our file fails only on the layout:** its IFD0 is the raw CFA image (no RGB IFD0, no SubIFD).
+- **Users of the RGB image** (0x78BE8 reads descriptor +4): 0x4D9E0, 0x6A464, 0x6B320 (methods; probably
+  the gallery / index view and info). Whether they need 320×240 isn't checked yet.
+- **Open:**
+  1. 0x45DB8: what develops the raw for display, and does it accept 3976 × 2646 (camera DNG
+     3920 × 2638) and 14-bit values in 16-bit samples?
+  2. The gallery / index view's use of the RGB image (size?).
+  3. Read time: 21 MB instead of ~10 MB per picture.
+- **Reader object = the DNG class** (constructor 0x6CB7C: base 0x76C20, vtable 0xED8FC). Its methods
+  are **readers**, called by the parser after each IFD:
+  - 0x6CBB4 (IFD0: AsShotNeutral → +0x12D0, Orientation);
+  - 0x6CC60 (EXIF);
+  - 0x6CF64 (raw IFD: CFAPattern 0x828E, count 4, required).
+
+  Correction: earlier notes called 0x6CBB4 / 0x6CC60 the camera-DNG writers.
+- **EXIF reader 0x6CC60 requires:**
+  - ExposureProgram 0x8822 and ISO 0x8827 (SHORT);
+  - ShutterSpeedValue 0x9201, ExposureBias 0x9204, FocalLength 0x920A;
+  - **WhiteBalance 0xA403**.
+
+  Optional: MakerNote 0x927C ("LEICA": it reads 0x302 and 0x304) and ImageUniqueID 0xA420 (33 bytes).
+- **Emulator test (2026-11-06, scratch harness: the real reader code 0x6C000-0x6E000 and 0x76000-0x7A000;
+  card open / read / seek / close stubbed with the Mac file):**
+
+  | File | Result |
+  |---|---|
+  | camera DNG L1030602 (control) | **accepted**: RGB 320×240, raw 3920×2638, 8-bit with table, 165 strips |
+  | our `--meta` file named .DNG | rejected (as stage 5 on the camera) |
+  | **prototype** (below) | **accepted**: RGB 40×30, raw 3976×2646, 16-bit, no table, 1 strip |
+
+  On the prototype, 0x78BC8 (read the whole raw) returns 21,040,992 bytes **identical to the sensor
+  data**.
+- **Prototype layout** (Mac, `work/play/L1031902.DNG`, same file size, all in the trailing row: 4,960
+  of 7,952 bytes):
+  - IFD0 = 40×30 RGB image + SubIFDs + ExifIFD + the DNG colour tags;
+  - SubIFD = our raw tags;
+  - EXIF + WhiteBalance 0;
+  - MakerNote.
+
+  LibRaw decodes it (WB, black, white as before) and macOS opens it.
+- **Still open (camera only):**
+  - whether the display develop (after 0x46200 / event 0x2718 → 0x43EF0) shows 3976 × 2646 14-bit
+    data correctly;
+  - what the gallery does with a 40×30 RGB image;
+  - the read time per image (21 MB instead of ~10 MB).
+
+### `dng --play` test build (2026-11-06, flashed, rejected → work in progress)
+
+- Pieces (`m8_dngpatch.PLAY_PIECES`): tiff, **play** (ldimg tables, `m8_wrapdng.build_play_template`,
+  `2c0032b2…`, 1360 bytes, 24 slots, no job dump, 32 bytes free), **play code** (`tools/asm/m8_dngplay.s`,
+  696 bytes in writejpgipp), meta hook, meta fetch, **ext** (files named .DNG).
+  - The play code = m8_dngmeta.s, plus `thumb` after raw_fetch (meta_hook 0x26DA0 and raw_fetch 0x26F98
+    unchanged); SPAN 0x1400.
+  - `thumb`: IFD0 image 40×30 R,G,B = every 8th pixel / row of review buffer `[job+0x26C]`
+    (0x24C1CE0 + idx × 0x38400), only if idx < 10 and its review-done byte 0x169BD4[idx] is set (else
+    it stays black); destination checked inside the trailing row; tables +22 = its template offset.
+- `dng --play --info --dial-ev` = `352964b705ee1a2a2707bb555f0e543ec6a732451b1cd509e14301806b2450fc`.
+  - m8_savetest 71/0: file == expected (PLAY layout + image sampled from the stand-in review image);
+    name .DNG; MakerNote / AsShotNeutral == JPG; IFD0 image cases (buffers 0 and 9, done byte 0,
+    index 10 / -1); guards; BlackLevel 16 ISOs; writes only the trailing row + stack.
+  - The emulated camera's file is accepted by PLAY's reader, and its raw read == the sensor data.
+  - Offered builds unchanged (combotest 43/0).
+- **Camera test 2026-11-06 [tested]: PLAY can't develop our raw.**
+  - Files are written as `L….JPG` + `L….DNG`, and the reader accepts them: no file-name-only screen
+    as in stage 5.
+  - The picture is wrong: the first PLAY showed many horizontal lines, and the next a washed-out
+    purple image.
+  - **Owner's decision: RAW-only / PLAY of our DNG is dropped for now, kept as work in progress
+    (like the picture profiles). The offered builds stay as they are (`.RAW` + JPG).**
+- **Likely causes (not verified):**
+  - The display develop after the reader probably assumes the camera's own raw: 3920 × 2638, 8-bit
+    expanded through the table at 0xE1790 into 16-bit linear values. Ours is 3976 wide, a different
+    row stride → horizontal lines.
+  - Our values are 14-bit with the black pedestal still in (the camera's own DNG has black subtracted
+    and clipped) → washed out, with a colour cast.
+  - The next research step would be the develop path after event 0x2718 (0x43EF0 → 0x43440 …) and
+    what it sends to the Blackfin; or writing the camera's own geometry and value range, which our
+    in-place file can't do without changing the pixels.
+- Kept for later: `m8_dngpatch` pieces `play` / `play code` (`PLAY_PIECES`, `dng --play`; not offered,
+  not in `BUILDS`), `tools/asm/m8_dngplay.s`, `m8_wrapdng.py --play`, the savetest `--play` cases, and the
+  emulator harness for PLAY's reader (`work/play/playtest.py`, scratch).
 
 ## Camera's own 8-bit DNG vs the 14-bit data (file analysis, 2026-10-21)
 

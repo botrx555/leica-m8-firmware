@@ -26,6 +26,7 @@ by ISO gain, which the camera knows).
 
 Usage: python3 tools/m8_wrapdng.py in.RAW [out.DNG] [--black N (default 92, 0 = omit)] [-t template.bin]
        [--meta: as `dng --meta`, the Leica MakerNote + AsShotNeutral from the JPG's MakerNote]
+       [--play: --meta in PLAY's layout (build_play_template), small RGB image from the JPG]
 """
 import os, struct, sys, time
 
@@ -193,6 +194,92 @@ def build_template(black=BLACK, maker=False):
     return bytes(out + data), slots
 
 
+# `--play` (FINDINGS "How PLAY reads a DNG"): the layout the camera's own DNG reader needs, so PLAY
+# can show the file named .DNG: IFD0 = small 8-bit RGB image (every 8th pixel of every 8th row of
+# the camera's 320x240 review image) + SubIFDs + ExifIFD + the DNG colour tags; SubIFD = the raw
+# (same pixels, same tags); EXIF + WhiteBalance (required by PLAY's EXIF reader 0x6CC60).
+THUMB_W, THUMB_H, THUMB_STEP = 40, 30, 8
+REVIEW_W, REVIEW_H = 320, 240
+
+
+def build_play_template(black=BLACK):
+    """Return (template, slots) for `--play`: as build_template(black, maker=True) but in PLAY's
+    layout; slots['Thumbnail'] = (offset after the template, THUMB_W * THUMB_H * 3, None)."""
+    shot = [(tag, typ, default) for tag, _, typ, default, _ in SHOT_FIELDS]
+    exif = [(36864, UNDEF, b'0220')] + [e for e in shot if e[0] in EXIF_TAGS]
+    exif += [(37500, UNDEF, maker_blob()[0]), (41987, SHORT, 0)]          # MakerNote, WhiteBalance
+    ifd0 = [
+        (254, LONG, 1), (256, LONG, THUMB_W), (257, LONG, THUMB_H), (258, SHORT, [8, 8, 8]),
+        (259, SHORT, 1), (262, SHORT, 2), (271, ASCII, MAKE), (272, ASCII, MODEL),
+        (273, LONG, 'THUMB'), (274, SHORT, 1), (277, SHORT, 3), (278, LONG, THUMB_H),
+        (279, LONG, THUMB_W * THUMB_H * 3), (284, SHORT, 1), (305, ASCII, SOFTWARE),
+        (330, LONG, 'RAW'), (34665, LONG, 'EXIF'),
+        (50706, BYTE, b'\x01\x00\x00\x00'), (50707, BYTE, b'\x01\x00\x00\x00'), (50708, ASCII, UNIQUE),
+        (50721, SRATIONAL, [(x, 10000) for x in CM1]), (50722, SRATIONAL, [(x, 10000) for x in CM2]),
+        (50731, RATIONAL, [(1, 1)]), (50732, RATIONAL, [(1, 1)]), (50778, SHORT, 17), (50779, SHORT, 21),
+        *[e for e in shot if e[0] not in EXIF_TAGS],             # DateTime, AsShotNeutral slots
+    ]
+    raw = [
+        (254, LONG, 0), (256, LONG, W), (257, LONG, H), (258, SHORT, 16), (259, SHORT, 1),
+        (262, SHORT, 32803), (273, LONG, HDR), (277, SHORT, 1), (278, LONG, H), (279, LONG, STRIP),
+        (284, SHORT, 1), (33421, SHORT, [2, 2]), (33422, BYTE, b'\x00\x01\x01\x02'),
+        *([(50714, SHORT, black)] if black else []), (50717, LONG, 16383),
+        (50719, SHORT, [2, 2]), (50720, SHORT, [W_ACTIVE - 4, H - 4]),
+        (50733, LONG, 500), (50738, RATIONAL, [(0, 1)]),
+    ]
+    size = lambda e: 2 + 12 * len(e) + 4
+    off = {'RAW': size(ifd0)}
+    off['EXIF'] = off['RAW'] + size(raw)
+    data_off = off['EXIF'] + size(exif)
+    out, data, slots, fix = bytearray(), bytearray(), {}, []
+
+    def emit(entries):
+        blob = struct.pack('<H', len(entries))
+        for tag, typ, v in sorted(entries, key=lambda e: e[0]):
+            if v == 'THUMB':
+                fix.append(len(out) + len(blob) + 8)
+                v = 0
+            elif typ == LONG and v in off:
+                v = BASE + off[v]
+            raw_v = pack_value(typ, v)
+            count = len(raw_v) // SIZE[typ]
+            if len(raw_v) <= 4:
+                field = raw_v.ljust(4, b'\0')
+                where = len(out) + len(blob) + 8
+            else:
+                where = data_off + len(data)
+                field = struct.pack('<I', BASE + where)
+                data.extend(raw_v + b'\0' * (len(raw_v) & 1))
+            if tag in SLOT_TAGS:
+                slots[SLOT_TAGS[tag][0]] = (where, len(raw_v), typ)
+            elif tag == 50714:
+                slots['BlackLevel'] = (where, len(raw_v), typ)
+            elif tag == 37500:
+                slots['MakerNote'] = (where, len(raw_v), typ)
+            blob += struct.pack('<HHI', tag, typ, count) + field
+        return blob + struct.pack('<I', 0)
+
+    out += emit(ifd0)
+    assert len(out) == off['RAW']
+    out += emit(raw)
+    assert len(out) == off['EXIF']
+    out += emit(exif)
+    assert len(out) == data_off
+    t = out + data
+    t += bytes(-len(t) % 4)
+    thumb = len(t)
+    for at in fix:
+        struct.pack_into('<I', t, at, BASE + thumb)
+    slots['Thumbnail'] = (thumb, THUMB_W * THUMB_H * 3, None)
+    return bytes(t), slots
+
+
+def thumbnail(review):
+    """The camera's IFD0 image from a 320x240 R,G,B review image: every THUMB_STEP-th pixel and row."""
+    return b''.join(review[3 * (REVIEW_W * y * THUMB_STEP + x * THUMB_STEP):][:3]
+                    for y in range(THUMB_H) for x in range(THUMB_W))
+
+
 def wrap(raw, template, slots, shot):
     """What the camera does per shot: header, slot patches (from S), template into trailing row."""
     assert len(raw) == RAW_SIZE, f'RAW is {len(raw)} bytes, expected {RAW_SIZE}'
@@ -217,6 +304,14 @@ def check(dng, raw):
         tag, typ, cnt, val = struct.unpack_from('<HHII', dng, BASE + 2 + 12 * i)
         tags[tag] = (typ, cnt, val)
     assert list(tags) == sorted(tags), 'tags not ascending'
+    if 330 in tags:                                     # --play: IFD0 = RGB image, raw in the SubIFD
+        sub = tags[330][2]
+        assert tags[258][1] == 3 and tags[262][2] == 2 and tags[277][2] == 3
+        assert tags[273][2] + tags[279][2] <= len(dng)
+        rt = {t: (ty, c, v) for t, ty, c, v in
+              (struct.unpack_from('<HHII', dng, sub + 2 + 12 * i) for i in range(struct.unpack_from('<H', dng, sub)[0]))}
+        assert rt[273][2] == HDR and rt[279][2] == STRIP and rt[256][2] == W and rt[257][2] == H
+        return n
     assert tags[273][2] == HDR and tags[279][2] == STRIP and HDR + STRIP <= RAW_SIZE
     assert tags[256][2] == W and tags[257][2] == H
     for tag, (typ, cnt, val) in tags.items():
@@ -310,14 +405,15 @@ def main():
         i = args.index('--black'); black = int(args[i + 1]); del args[i:i + 2]
     if '-t' in args:
         i = args.index('-t'); tpl_out = args[i + 1]; del args[i:i + 2]
-    meta = '--meta' in args
-    args = [a for a in args if a != '--meta']
+    play = '--play' in args
+    meta = '--meta' in args or play
+    args = [a for a in args if a not in ('--meta', '--play')]
     if not args:
         raise SystemExit(__doc__)
     src = args[0]
     dst = args[1] if len(args) > 1 else os.path.splitext(src)[0] + '.DNG'
     raw = open(src, 'rb').read()
-    template, slots = build_template(black, maker=meta)
+    template, slots = build_play_template(black) if play else build_template(black, maker=meta)
     jpg = os.path.splitext(src)[0] + '.JPG'
     shot = jpg_shot(jpg) if os.path.exists(jpg) else {}
     if meta:
@@ -330,6 +426,11 @@ def main():
     if black:
         shot['BlackLevel'] = black_for_iso(shot.get('ISO'), black)
     dng = wrap(raw, template, slots, shot)
+    if play:                                    # the camera samples its 320x240 review image
+        from PIL import Image
+        off, n, _ = slots['Thumbnail']
+        review = Image.open(jpg).convert('RGB').resize((REVIEW_W, REVIEW_H), Image.BOX).tobytes()
+        dng = dng[:BASE + off] + thumbnail(review) + dng[BASE + off + n:]
     n = check(dng, raw)
     open(dst, 'wb').write(dng)
     print(f'template {len(template)} bytes, {n} IFD0 tags, {len(slots)} slots; per-shot values from '

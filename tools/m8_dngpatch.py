@@ -173,6 +173,29 @@ META_TEMPLATE_SHA = 'b1a2b57c837f4ff09296d56bcb6b55f74006aca5308892ef0255b478980
 META_SPAN = 0x800                          # meta_hook's SPAN: every write must end inside it
 DUMP_AT, DUMP_LEN = 0x500, 0x280           # job+0..0x280 copied behind the template (desktop check)
 
+# --play: tools/asm/m8_dngplay.s at 0x26D98 (as META_CODE, plus `thumb` after raw_fetch; SPAN 0x1400).
+# The tables in ldimg hold PLAY's layout (m8_wrapdng.build_play_template): IFD0 = 40x30 RGB image from
+# the review image, raw in the SubIFD, EXIF + WhiteBalance (FINDINGS "How PLAY reads a DNG").
+PLAY_CODE = bytes.fromhex(
+    '0000a0e31eff2fe1f04f2de9c8819fe546cc84e234509ce51a12d5e5000051e35a00001a42cc84e228109ce52c209ce5'
+    '20a09ce5a4319fe5030051e1a0319f05030052015100001a98619fe501001ae394319f1503608610076086e0016046e0'
+    '80319fe5030056e14800003a7c319fe5030056e14500008a002098e504b098e51c9088e28b1189e00600a0e10fe0a0e1'
+    '400000ea01b05be20700004ab200d9e0b210d9e0b420d9e0000086e0011085e00fe0a0e1370000eaf5ffffea080098e5'
+    '000050e30f00000a0c9088e2b616d5e1b820d9e10430a0e3b2c0d9e00c0051e18220a081013053e2faffff1a04202de5'
+    '000086e00d10a0e10220a0e30fe0a0e1240000ea04d08de2b801d8e1ba11d8e1000050e33f00000a011085e001c9a0e3'
+    '002091e5083091e50c0052e10c0053010c209105103091050c0052010c0053013400001a042091e5143091e5000052e3'
+    '000053132f00000a000086e01820a0e30fe0a0e10b0000ea2a0000ea1f00c6e3051b86e23a0f07ee360f07ee200080e2'
+    '010050e1faffff3a0000a0e39a0f07eef04fbde8c0f04ee2060050e11eff2f3102c080e000005ce11eff2f312c309fe5'
+    '033086e003005ce11eff2f8130309fe503005ce11eff2f81012052e20130d1540130c054fbffff5a1eff2fe1b88a0200'
+    '101f0000570a0000e0446f0280e00300e0b17602e0c576020000000000000000a0f09f15061097e71a12d1e5000051e3'
+    '90f09f0590f09fe5b601d8e1000050e3d1ffff0a6c1295e50a0051e3ceffff2a78209fe50120d2e7000052e3caffff0a'
+    'e12ba0e368309fe5923121e0000086e0060050e1c4ffff3a113ca0e3033086e0030050e1c0ffff8a1e20a0e32830a0e3'
+    '00c0d1e501c0c0e401c0d1e501c0c0e402c0d1e501c0c0e4181081e2013053e2f6ffff1a1a1c81e2401081e2012052e2'
+    'f1ffff1ab0ffffea70cc03009ccb0300d49b1600e01c4c02')
+PLAY_CODE_SHA = '869ffd4b9a6d7120fb4e47b3298439bcf02ce636ec33d1893bace5ebdf22a78c'
+PLAY_TEMPLATE_SHA = '2c0032b26ff621378efc1b885c8181e2058749ef2df5093ca1319785fbb369a9'   # 1360 bytes
+PLAY_SPAN = 0x1400
+
 # tools/asm/m8_info.s at 0x2ABD0 (stub, info_open, literal pool)
 INFO_CODE = bytes.fromhex(
     '0000a0e31eff2fe16f0c84e26c0080e20110a0e30fe0a0e12cf09fe5953b84e20120a0e38f20c3e56f0c84e26c0080e2'
@@ -540,6 +563,63 @@ def meta_code_blob():
     return META_CODE + UDF * ((hi - lo - len(META_CODE)) // 4)
 
 
+def play_template():
+    t, slots = m8_wrapdng.build_play_template(m8_wrapdng.BLACK)
+    if hashlib.sha256(t).hexdigest() != PLAY_TEMPLATE_SHA:
+        raise SystemExit('--play template changed (m8_wrapdng.build_play_template); re-test and update PLAY_TEMPLATE_SHA')
+    return t, slots
+
+
+def play_slot_table():
+    """As meta_slot_table() for PLAY's template, without the job dump (offsets confirmed on the camera)."""
+    t, slots = play_template()
+    out = []
+    for _, name, _, _, where in m8_wrapdng.SHOT_FIELDS:
+        if where.startswith('S+'):
+            off, n, _ = slots[name]
+            out.append((name, off, 4 + int(where[2:], 16), n))
+    mn = slots['MakerNote'][0]
+    out += [(f'MakerNote+{o}', mn + o, 4 + s, n) for o, s, n in m8_wrapdng.maker_blob()[1]]
+    toff, tn, _ = slots['Thumbnail']
+    assert toff == len(t) and toff % 4 == 0 and toff + tn <= PLAY_SPAN <= m8_wrapdng.TRAIL
+    assert all(off + n <= len(t) for _, off, _, n in out)
+    return out
+
+
+def play_tables():
+    """As meta_tables(), with PLAY's template; +22 u16 = template offset of the IFD0 image."""
+    t, slots = play_template()
+    st = play_slot_table()
+    _, steps, base = black_table()
+    boff, n, typ = slots['BlackLevel']
+    assert (n, typ) == (2, 3)
+    woff, n, typ = slots['AsShotNeutral']
+    assert (n, typ) == (24, 5)
+    b = struct.pack('<3I', len(t), len(st), boff) + struct.pack('<6H', *steps, base, slots['Thumbnail'][0])
+    b += struct.pack('<2H', woff, 4 + m8_wrapdng.NEUTRAL_S)
+    b += b''.join(struct.pack('<4H', off, src, n, 0) for _, off, src, n in st)
+    return b + t
+
+
+def play_blob():
+    """ldimg for --play: the stub (as dng's), then the tables, rest undefined fill."""
+    lo, hi = REGIONS['ldimg']
+    b = HOOK_CODE[:8] + play_tables()
+    b += b'\0' * (-len(b) % 4)
+    if len(b) > hi - lo:
+        raise SystemExit(f'ldimg overflow (--play): {len(b)} > {hi - lo} bytes')
+    return b + UDF * ((hi - lo - len(b)) // 4)
+
+
+def play_code_blob():
+    if hashlib.sha256(PLAY_CODE).hexdigest() != PLAY_CODE_SHA:
+        raise SystemExit('PLAY_CODE does not match its SHA-256')
+    lo, hi = REGIONS['jpgipp']
+    if len(PLAY_CODE) > hi - lo:
+        raise SystemExit('writejpgipp overflow (--play)')
+    return PLAY_CODE + UDF * ((hi - lo - len(PLAY_CODE)) // 4)
+
+
 def memtest_blob():
     if hashlib.sha256(INFO_CODE).hexdigest() != INFO_CODE_SHA:
         raise SystemExit('INFO_CODE does not match its SHA-256')
@@ -619,6 +699,8 @@ def pieces():
         'meta code': ('jpgipp', REGIONS['jpgipp'][0], JPGIPP_STOCK_SHA, meta_code_blob()),
         'meta hook': ('hook', 0x3C6A8, bytes.fromhex('cfffffea'), bl(0x3C6A8, META_ENTRY)),
         'meta fetch': ('fetch', 0x3CB98, bytes.fromhex('3400001a'), b(0x3CB98, META_FETCH)),
+        'play': ('ldimg', lo, LDIMG_STOCK_SHA, play_blob()),
+        'play code': ('jpgipp', REGIONS['jpgipp'][0], JPGIPP_STOCK_SHA, play_code_blob()),
         'ext': ('ext', 0x3CFF8, struct.pack('<I', 0xD6590), struct.pack('<I', 0xD6570)),
         'info': ('memtest', REGIONS['memtest'][0], MEMTEST_STOCK_SHA, memtest_blob()),
         'info key': ('infokey', 0x44F68, bytes.fromhex('0700001a'), bne(0x44F68, INFO_ENTRY)),
@@ -679,16 +761,21 @@ OLD_NUMBERS = {4: ('dng', None, False), 8: ('dng', 'info', False), 10: ('raw-men
 
 
 META_PIECES = ['tiff', 'meta', 'meta code', 'meta hook', 'meta fetch']   # dng --meta: replaces dng's pieces
+# dng --play (work in progress, not offered): --meta in PLAY's layout, files named .DNG (ext). Camera test
+# 2026-11-06: PLAY reads the file but can't develop our raw (lines / purple) -> FINDINGS "dng --play"
+PLAY_PIECES = ['tiff', 'play', 'play code', 'meta hook', 'meta fetch', 'ext']
 
 
 def build_pieces(option, screen=None, dial=False, meta=False):
     if meta and option != 'dng':
         raise SystemExit('--meta needs the dng option')
-    return (META_PIECES if meta else OPTION_PIECES[option]) + SCREEN_PIECES[screen] + (DIAL_PIECES if dial else [])
+    base = PLAY_PIECES if meta == 'play' else META_PIECES if meta else OPTION_PIECES[option]
+    return base + SCREEN_PIECES[screen] + (DIAL_PIECES if dial else [])
 
 
 def build_name(option, screen=None, dial=False, meta=False):
-    return option + (' --meta' if meta else '') + (f' --{screen}' if screen else '') + (' --dial-ev' if dial else '')
+    return option + (' --play' if meta == 'play' else ' --meta' if meta else '') + \
+        (f' --{screen}' if screen else '') + (' --dial-ev' if dial else '')
 
 
 def stage_pieces(stage):
@@ -766,6 +853,10 @@ KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
         'INFO Camera stats and the dial work)',
     'a0161ed4991003134afd8a6dbcebbe2529dfddec3b3af02f46c2cc3c6e9c754f':
         'dng --meta --profiles; m8_savetest, m8_combotest; not flashed; every piece camera-tested',
+    '352964b705ee1a2a2707bb555f0e543ec6a732451b1cd509e14301806b2450fc':
+        'dng --play --info --dial-ev (test: PLAY layout, files named .DNG, JPG kept); m8_savetest 71/0; '
+        'emulated camera file accepted by the PLAY reader (raw read == sensor data); flashed 2026-11-06: PLAY '
+        'shows horizontal lines / a washed-out purple image -> rolled back, work in progress',
     '823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25':
         'stage 20, Option 1 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 39/0; not flashed; every piece camera-tested (v0.6.0)',
 }
@@ -911,7 +1002,8 @@ def show(base, new, names=()):
     pa, pb = pxa_of(base), pxa_of(new)
     words = sorted({(s & ~3) + k for s, e in changed_ranges(pa, pb) for k in range(0, e - (s & ~3), 4)})
     lo, hi = REGIONS['ldimg']
-    tables = META_TABLES if 'meta' in names else TABLES
+    meta = 'meta' in names or 'play' in names
+    tables = META_TABLES if meta else TABLES
     data = [o for o in words if tables <= PXA_BASE + o < hi]
     fill = [o for o in words if pb[o:o + 4] == UDF and not tables <= PXA_BASE + o < hi]
     for o in words:
@@ -922,7 +1014,7 @@ def show(base, new, names=()):
         neu = next(md.disasm(pb[o:o + 4], va), None)
         fmt = lambda i, raw: f'{raw.hex()}  {i.mnemonic} {i.op_str}' if i else f'{raw.hex()}  (data)'
         print(f'  0x{va:X}: {fmt(old, pa[o:o + 4])}  ->  {fmt(neu, pb[o:o + 4])}')
-    if data and 'meta' in names:
+    if data and meta:
         b = pb[META_TABLES - PXA_BASE:hi - PXA_BASE]
         tlen, nslots, boff = struct.unpack_from('<3I', b)
         woff, wsrc = struct.unpack_from('<2H', b, 24)
@@ -930,6 +1022,7 @@ def show(base, new, names=()):
         print(f'  0x{META_TABLES:X}-0x{hi:X}: data -- {nslots} slots, template {tlen} bytes '
               f'(sha {hashlib.sha256(b[28 + 8 * nslots:used]).hexdigest()[:8]}, with MakerNote), '
               f'BlackLevel at template+{boff}, AsShotNeutral at template+{woff} from job+0x{wsrc:X}, '
+              + (f'IFD0 image at template+{struct.unpack_from("<H", b, 22)[0]}, ' if 'play' in names else '') +
               f'{hi - META_TABLES - used} bytes padding/undefined fill')
     elif data:
         b = pb[TABLES - PXA_BASE:hi - PXA_BASE]
@@ -954,9 +1047,9 @@ def main():
         title = (f'stage {stage}: {HISTORY[stage][0]}' if stage in HISTORY
                  else f'old stage {stage} = {build_name(*OLD_NUMBERS[stage])}')
     else:
-        dial, meta = '--dial-ev' in args, '--meta' in args
+        dial, meta = '--dial-ev' in args, 'play' if '--play' in args else '--meta' in args
         screens = [a[2:] for a in args if a in ('--info', '--profiles')]
-        args = [a for a in args if a not in ('--dial-ev', '--meta', '--info', '--profiles')]
+        args = [a for a in args if a not in ('--dial-ev', '--meta', '--play', '--info', '--profiles')]
         if len(screens) > 1 or len(args) != 3 or args[2] not in OPTION_PIECES:
             raise SystemExit(__doc__)
         screen = screens[0] if screens else None
