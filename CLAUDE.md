@@ -23,8 +23,8 @@ is. `.DNG` names (old stage 5) broke in-camera review, so the files stay `.RAW`.
   offers the 6 `META_BUILDS` (v0.7.0; .BIA long exposure camera-tested 2026-11-06).
 12 + 6 builds (`m8_dngpatch.BUILDS` + `META_BUILDS`); **owner's decision 2026-11-02: a build may ship when every piece is
 camera-tested**, pieces byte-identical to those builds and regions disjoint (`tools/m8_combotest.py`).
-A new or changed piece needs its own camera test. **Author's camera: `dng --profiles --dial-ev`
-(`1254b743…`); roll back to `dng --profiles` (`d7a17ef2…`).**
+A new or changed piece needs its own camera test. **Author's camera: `dng --meta --profiles --dial-ev`
+(`4359b04b…`, since 2026-11-05); roll back to `dng --profiles --dial-ev` (`1254b743…`).**
 Owner's decisions: no histogram / image screens (PLAY has one); INFO = Camera stats (an M10-style
 overview was built and rejected 2026-11-03); stock tone curves stay the default (a built-in MODERN
 curve, old stage 12, was flashed and rolled back 2026-10-27).
