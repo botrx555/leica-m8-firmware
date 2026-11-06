@@ -31,6 +31,13 @@ Pieces (each in one declared region, REGIONS):
           (m8_wrapdng.build_template), rest filled with undefined instructions; entry = stub
           returning 0. "ldimg (dump)" = same bytes with mode 1 instead of 2.
   hook    0x3C6A8 b 0x3C5EC -> bl 0x28AB8 (RAW producer, last block)
+  meta code  0x26D98-0x27090 writejpgipp debug command -> stub returning 0 + meta_hook
+          (tools/asm/m8_dngmeta.s: dng_hook's code, tables in ldimg, + per-shot AsShotNeutral)
+  meta    0x28AB0-0x29104 ldimg -> stub + tables + template with the Leica MakerNote + job-dump slot
+  meta hook  0x3C6A8 b 0x3C5EC -> bl 0x26DA0
+  meta fetch 0x3CB98 bne 0x3CC70 -> b 0x26F98 (raw_fetch in meta code): a RAW file (not .BIA) takes
+          the DNG's path through 0x3B430 first, so the per-shot neutral is in the job before the RAW
+          (`dng --meta` = tiff, meta, meta code, meta hook, meta fetch; META_BUILDS, not camera-tested)
   ext     0x3CFF8 store routine's "RAW" literal 0xD6590 -> "DNG" 0xD6570 (only reader: 0x3CCE0)
   info    0x2ABD0-0x2AF90 bf_memtest1 debug command -> stub returning 0 + info_open
           (tools/asm/m8_info.s), rest undefined fill
@@ -71,7 +78,7 @@ Safety checks run on every build (the build is refused if one fails):
 Test before flashing: work/venv/bin/python tools/m8_savetest.py --build dng --profiles (any build's flags)
 Copy the output to the card as M8-2_014.UPD (the updater looks for M8.UPD / M8-x_yyy.UPD).
 
-Usage: python3 m8_dngpatch.py stock.upd out.upd raw-menu|dng [--info | --profiles] [--dial-ev]
+Usage: python3 m8_dngpatch.py stock.upd out.upd raw-menu|dng [--meta] [--info | --profiles] [--dial-ev]
        python3 m8_dngpatch.py stock.upd out.upd --stage N      (HISTORY or OLD_NUMBERS)
 Needs: capstone (work/venv)
 """
@@ -99,6 +106,8 @@ REGIONS = {
     'evkey':  (0x44EDC, 0x44EE0),   # application key handler, switch default (b 0x44F8C)
     'evheld': (0x44E9C, 0x44EA0),   # application key handler, `a` held: every key ignored (bne 0x44F8C)
     'evtimer': (0xEF2B4, 0xEF2B8),  # GUI event table, handler word of event 0x271E (0x43B64)
+    'jpgipp': (0x26D98, 0x27090),   # reclaimed debug command writejpgipp, incl. literal pool (--meta code)
+    'fetch':  (0x3CB98, 0x3CB9C),   # store routine: JPG/DNG fetch the review image + neutral (bne 0x3CC70)
 }
 
 # tools/asm/m8_header.s at 0x3CE48 (46 instructions, replaces the stock block of the same size)
@@ -131,6 +140,32 @@ LDIMG_STOCK_SHA = 'c28db4ffa67195ca427394eb3e21a6c2ff6e9a3a89a37ac0150f3e802019f
 TEMPLATE_SHA = '5cb22fb2582678f4abacd6d0e85378179c3485f515d8251a3b0b683d1e564052'   # 902 bytes
 UDF = bytes.fromhex('f000f0e7')            # permanently undefined: fills the unused rest of ldimg
 MODE_DUMP, MODE_DNG = 1, 2
+
+# --meta: tools/asm/m8_dngmeta.s at 0x26D98 (writejpgipp: stub, meta_hook, .Lcopy, literal pool) --
+# dng_hook's code moved out of ldimg, without the dump mode, plus the per-shot white balance; ldimg
+# keeps its stub and holds the tables + the template with the Leica MakerNote (FINDINGS "Per-shot
+# white balance").
+META_CODE = bytes.fromhex(
+    '0000a0e31eff2fe1f04f2de9c4819fe546cc84e234509ce51a12d5e5000051e35900001a42cc84e228109ce52c209ce5'
+    '20a09ce5a0319fe5030051e19c319f05030052015000001a94619fe501001ae390319f1503608610076086e0016046e0'
+    '7c319fe5030056e14700003a78319fe5030056e14400008a002098e504b098e51c9088e28b1189e00600a0e10fe0a0e1'
+    '3f0000ea01b05be20700004ab200d9e0b210d9e0b420d9e0000086e0011085e00fe0a0e1360000eaf5ffffea080098e5'
+    '000050e30f00000a0c9088e2b616d5e1b820d9e10430a0e3b2c0d9e00c0051e18220a081013053e2faffff1a04202de5'
+    '000086e00d10a0e10220a0e30fe0a0e1230000ea04d08de2b801d8e1ba11d8e1000050e31300000a011085e001c9a0e3'
+    '002091e5083091e50c0052e10c0053010c209105103091050c0052010c0053010800001a042091e5143091e5000052e3'
+    '000053130300000a000086e01820a0e30fe0a0e10a0000ea1f00c6e3021b86e23a0f07ee360f07ee200080e2010050e1'
+    'faffff3a0000a0e39a0f07eef04fbde8c0f04ee2060050e11eff2f3102c080e000005ce11eff2f312c309fe5033086e0'
+    '03005ce11eff2f8130309fe503005ce11eff2f81012052e20130d1540130c054fbffff5a1eff2fe1b88a0200101f0000'
+    '570a0000e0446f0280e00300e0bd7602e0c5760200000000000000000000000010f09f15061097e71a12d1e5000051e3'
+    '00f09f0500f09fe570cc03009ccb0300')
+META_CODE_SHA = '04be5a93bb0f1347ac0f48e913399363065a9f73f9d9199e5a1d54998db0e21d'
+META_ENTRY = 0x26DA0                       # meta_hook
+META_FETCH = 0x26F98                       # raw_fetch (`.org 0x200`): RAW files fetch the neutral as DNGs
+META_TABLES = 0x28AB8                      # `ldr r8, =TABLES` in meta_hook: ldimg after its stub
+JPGIPP_STOCK_SHA = 'cdb0541adaddbd13ff93a8c2c48ba97d7080ddcdc55e01aca8b32500492e64f4'
+META_TEMPLATE_SHA = 'b1a2b57c837f4ff09296d56bcb6b55f74006aca5308892ef0255b4789808b6ab'   # 1192 bytes
+META_SPAN = 0x800                          # meta_hook's SPAN: every write must end inside it
+DUMP_AT, DUMP_LEN = 0x500, 0x280           # job+0..0x280 copied behind the template (desktop check)
 
 # tools/asm/m8_info.s at 0x2ABD0 (stub, info_open, literal pool)
 INFO_CODE = bytes.fromhex(
@@ -441,6 +476,64 @@ def ldimg_blob(mode):
     return b + UDF * ((hi - lo - len(b)) // 4)
 
 
+def meta_template():
+    t, slots = m8_wrapdng.build_template(m8_wrapdng.BLACK, maker=True)
+    if hashlib.sha256(t).hexdigest() != META_TEMPLATE_SHA:
+        raise SystemExit('--meta template changed (m8_wrapdng.build_template); re-test and update META_TEMPLATE_SHA')
+    return t, slots
+
+
+def meta_slot_table():
+    """[(name, template offset, job offset, length)]: dng's slots, the MakerNote values, the dump."""
+    t, slots = meta_template()
+    out = []
+    for _, name, _, _, where in m8_wrapdng.SHOT_FIELDS:
+        if where.startswith('S+'):
+            off, n, _ = slots[name]
+            out.append((name, off, 4 + int(where[2:], 16), n))
+    mn = slots['MakerNote'][0]
+    out += [(f'MakerNote+{o}', mn + o, 4 + s, n) for o, s, n in m8_wrapdng.maker_blob()[1]]
+    out.append(('job dump', DUMP_AT, 0, DUMP_LEN))
+    assert len(t) <= DUMP_AT and all(off + n <= META_SPAN for _, off, _, n in out)
+    return out
+
+
+def meta_tables():
+    """+0 template length, +4 slot count, +8 BlackLevel offset, +12 ISO thresholds + base black,
+    +24 u16 AsShotNeutral offset, +26 u16 job offset of the camera's neutral, +28 slots, template."""
+    t, slots = meta_template()
+    st = meta_slot_table()
+    boff, steps, base = black_table()
+    t_boff, n, typ = slots['BlackLevel']
+    assert (t_boff, n, typ) == (boff, 2, 3)              # BlackLevel sits where dng has it
+    woff, n, typ = slots['AsShotNeutral']
+    assert (n, typ) == (24, 5)
+    b = struct.pack('<3I', len(t), len(st), boff) + struct.pack('<6H', *steps, base, 0)
+    b += struct.pack('<2H', woff, 4 + m8_wrapdng.NEUTRAL_S)
+    b += b''.join(struct.pack('<4H', off, src, n, 0) for _, off, src, n in st)
+    return b + t
+
+
+def meta_blob():
+    """ldimg for --meta: the stub (as dng's), then the tables, rest undefined fill."""
+    lo, hi = REGIONS['ldimg']
+    b = HOOK_CODE[:8] + meta_tables()
+    assert lo + 8 == META_TABLES
+    b += b'\0' * (-len(b) % 4)
+    if len(b) > hi - lo:
+        raise SystemExit(f'ldimg overflow (--meta): {len(b)} > {hi - lo} bytes')
+    return b + UDF * ((hi - lo - len(b)) // 4)
+
+
+def meta_code_blob():
+    if hashlib.sha256(META_CODE).hexdigest() != META_CODE_SHA:
+        raise SystemExit('META_CODE does not match its SHA-256')
+    lo, hi = REGIONS['jpgipp']
+    if len(META_CODE) > hi - lo:
+        raise SystemExit('writejpgipp overflow')
+    return META_CODE + UDF * ((hi - lo - len(META_CODE)) // 4)
+
+
 def memtest_blob():
     if hashlib.sha256(INFO_CODE).hexdigest() != INFO_CODE_SHA:
         raise SystemExit('INFO_CODE does not match its SHA-256')
@@ -516,6 +609,10 @@ def pieces():
         'ldimg': ('ldimg', lo, LDIMG_STOCK_SHA, ldimg_blob(MODE_DNG)),
         'ldimg (dump)': ('ldimg', lo, LDIMG_STOCK_SHA, ldimg_blob(MODE_DUMP)),
         'hook': ('hook', 0x3C6A8, bytes.fromhex('cfffffea'), bl(0x3C6A8, HOOK_ENTRY)),
+        'meta': ('ldimg', lo, LDIMG_STOCK_SHA, meta_blob()),
+        'meta code': ('jpgipp', REGIONS['jpgipp'][0], JPGIPP_STOCK_SHA, meta_code_blob()),
+        'meta hook': ('hook', 0x3C6A8, bytes.fromhex('cfffffea'), bl(0x3C6A8, META_ENTRY)),
+        'meta fetch': ('fetch', 0x3CB98, bytes.fromhex('3400001a'), b(0x3CB98, META_FETCH)),
         'ext': ('ext', 0x3CFF8, struct.pack('<I', 0xD6590), struct.pack('<I', 0xD6570)),
         'info': ('memtest', REGIONS['memtest'][0], MEMTEST_STOCK_SHA, memtest_blob()),
         'info key': ('infokey', 0x44F68, bytes.fromhex('0700001a'), bne(0x44F68, INFO_ENTRY)),
@@ -552,6 +649,8 @@ OPTION_PIECES = {'raw-menu': [], 'dng': ['tiff', 'ldimg', 'hook']}
 SCREEN_PIECES = {None: [], 'info': ['stats', 'stats key'], 'profiles': ['picker', 'picker key']}
 DIAL_PIECES = ['ev', 'ev key', 'ev held', 'ev timer']
 BUILDS = [(o, sc, dl) for o in ('raw-menu', 'dng') for sc in (None, 'info', 'profiles') for dl in (False, True)]
+# dng --meta (per-shot WB + Leica MakerNote): not camera-tested yet, so not in BUILDS / m8patch.py
+META_BUILDS = [('dng', sc, dl, True) for sc in (None, 'info', 'profiles') for dl in (False, True)]
 # piece -> (pieces, flashed build it was camera-tested in, date)
 TESTED_PIECES = {
     'raw-menu': ([], 'f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396', '2026-10-19'),
@@ -568,12 +667,17 @@ OLD_NUMBERS = {4: ('dng', None, False), 8: ('dng', 'info', False), 10: ('raw-men
                19: ('dng', None, True), 20: ('raw-menu', None, True)}
 
 
-def build_pieces(option, screen=None, dial=False):
-    return OPTION_PIECES[option] + SCREEN_PIECES[screen] + (DIAL_PIECES if dial else [])
+META_PIECES = ['tiff', 'meta', 'meta code', 'meta hook', 'meta fetch']   # dng --meta: replaces dng's pieces
 
 
-def build_name(option, screen=None, dial=False):
-    return option + (f' --{screen}' if screen else '') + (' --dial-ev' if dial else '')
+def build_pieces(option, screen=None, dial=False, meta=False):
+    if meta and option != 'dng':
+        raise SystemExit('--meta needs the dng option')
+    return (META_PIECES if meta else OPTION_PIECES[option]) + SCREEN_PIECES[screen] + (DIAL_PIECES if dial else [])
+
+
+def build_name(option, screen=None, dial=False, meta=False):
+    return option + (' --meta' if meta else '') + (f' --{screen}' if screen else '') + (' --dial-ev' if dial else '')
 
 
 def stage_pieces(stage):
@@ -632,6 +736,13 @@ KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
     '31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074':
         'stage 19, dng --dial-ev; m8_evtest 164/0, m8_combotest, m8_savetest 49/0; flashed and camera-tested '
         '2026-11-04 on a second M8 by vcs222 (PR #6: dial worked; -2/0/+2 EV DNGs decode, bias matches the JPG)',
+    '32aa29f9ccca95fda767b0aff506a11385205ba3924349ecb134fc1cfd5c7162':
+        'dng --meta --profiles --dial-ev, first version (no meta fetch); flashed 2026-11-05: MakerNote OK, '
+        'AsShotNeutral = the job default 7000/10000 (neutral not fetched yet at the RAW); superseded',
+    '4359b04b41dd81761730e79fde3b46a09044e908c55cdc56cd8d8add3288e905':
+        'dng --meta --profiles --dial-ev (per-shot WB + Leica MakerNote, with meta fetch); m8_savetest 66/0; '
+        'flashed and camera-tested 2026-11-05 (L1032095-99: AsShotNeutral and all 18 MakerNote tags == the JPG; '
+        'image data normal; owner report: WB looks better in Lightroom)',
     '823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25':
         'stage 20, Option 1 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 39/0; not flashed; every piece camera-tested (v0.6.0)',
 }
@@ -699,9 +810,9 @@ def stage_file(stock, stage):
     return pieces_file(stock, stage_pieces(stage))
 
 
-def build_file(stock, option, screen=None, dial=False):
+def build_file(stock, option, screen=None, dial=False, meta=False):
     """Stock .upd bytes -> (Option 1, build) from the build's flags; region check passed."""
-    return pieces_file(stock, build_pieces(option, screen, dial))
+    return pieces_file(stock, build_pieces(option, screen, dial, meta))
 
 
 def pieces_file(stock, all_names):
@@ -769,7 +880,7 @@ def pxa_of(upd):
     return upd[pos:pos + size]
 
 
-def show(base, new):
+def show(base, new, names=()):
     """Disassemble every changed instruction word, old and new, at its real address; the data
     part of ldimg (tables, template, fill) is summarised."""
     import capstone
@@ -777,17 +888,27 @@ def show(base, new):
     pa, pb = pxa_of(base), pxa_of(new)
     words = sorted({(s & ~3) + k for s, e in changed_ranges(pa, pb) for k in range(0, e - (s & ~3), 4)})
     lo, hi = REGIONS['ldimg']
-    data = [o for o in words if TABLES <= PXA_BASE + o < hi]
-    fill = [o for o in words if pb[o:o + 4] == UDF and not TABLES <= PXA_BASE + o < hi]
+    tables = META_TABLES if 'meta' in names else TABLES
+    data = [o for o in words if tables <= PXA_BASE + o < hi]
+    fill = [o for o in words if pb[o:o + 4] == UDF and not tables <= PXA_BASE + o < hi]
     for o in words:
         va = PXA_BASE + o
-        if TABLES <= va < hi or o in fill:
+        if tables <= va < hi or o in fill:
             continue
         old = next(md.disasm(pa[o:o + 4], va), None)
         neu = next(md.disasm(pb[o:o + 4], va), None)
         fmt = lambda i, raw: f'{raw.hex()}  {i.mnemonic} {i.op_str}' if i else f'{raw.hex()}  (data)'
         print(f'  0x{va:X}: {fmt(old, pa[o:o + 4])}  ->  {fmt(neu, pb[o:o + 4])}')
-    if data:
+    if data and 'meta' in names:
+        b = pb[META_TABLES - PXA_BASE:hi - PXA_BASE]
+        tlen, nslots, boff = struct.unpack_from('<3I', b)
+        woff, wsrc = struct.unpack_from('<2H', b, 24)
+        used = 28 + 8 * nslots + tlen
+        print(f'  0x{META_TABLES:X}-0x{hi:X}: data -- {nslots} slots, template {tlen} bytes '
+              f'(sha {hashlib.sha256(b[28 + 8 * nslots:used]).hexdigest()[:8]}, with MakerNote), '
+              f'BlackLevel at template+{boff}, AsShotNeutral at template+{woff} from job+0x{wsrc:X}, '
+              f'{hi - META_TABLES - used} bytes padding/undefined fill')
+    elif data:
         b = pb[TABLES - PXA_BASE:hi - PXA_BASE]
         mode, tlen, nslots, boff = struct.unpack_from('<4I', b)
         used = 28 + 8 * nslots + tlen
@@ -810,22 +931,22 @@ def main():
         title = (f'stage {stage}: {HISTORY[stage][0]}' if stage in HISTORY
                  else f'old stage {stage} = {build_name(*OLD_NUMBERS[stage])}')
     else:
-        dial = '--dial-ev' in args
+        dial, meta = '--dial-ev' in args, '--meta' in args
         screens = [a[2:] for a in args if a in ('--info', '--profiles')]
-        args = [a for a in args if a not in ('--dial-ev', '--info', '--profiles')]
+        args = [a for a in args if a not in ('--dial-ev', '--meta', '--info', '--profiles')]
         if len(screens) > 1 or len(args) != 3 or args[2] not in OPTION_PIECES:
             raise SystemExit(__doc__)
         screen = screens[0] if screens else None
         option = args.pop()
-        names = build_pieces(option, screen, dial)
-        title = 'build ' + build_name(option, screen, dial)
+        names = build_pieces(option, screen, dial, meta)
+        title = 'build ' + build_name(option, screen, dial, meta)
     if len(args) != 2:
         raise SystemExit(__doc__)
     src, dst = args
     print(title)
     base, new = pieces_file(open(src, 'rb').read(), names)
     print('base: Option 1 (flashed persistent-RAW build)', FLASHED_SHA[:8], '; pieces:', ', '.join(names) or 'none')
-    show(base, new)
+    show(base, new, names)
     regions = regions_of(names)
     n = sum(e - s for s, e in changed_ranges(base, new))
     print(f'differs from Option 1 in {n} byte(s), all inside declared regions '

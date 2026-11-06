@@ -279,7 +279,7 @@ scratch-card playback test with our DNG (pair + lone copy) on the current build:
   needed for the per-channel question. Original note: **Easy.** Firmware side: dng_hook looks up ISO (job+0x66, already camera-verified) in the table
   and writes the BlackLevel value (one more slot, or 4 per-channel values if (a) says so). If the
   answer is "flat 92 everywhere", nothing changes.
-- [ ] **Per-shot white balance → AsShotNeutral — parked 2026-10-21** (owner: fine with Lightroom WB;
+- [ ] **Per-shot white balance → AsShotNeutral — built 2026-11-05 as `dng --meta` (FINDINGS "`dng --meta`"); first camera test: neutral not yet in the job at the RAW (default 7000/10000); rebuilt with `meta fetch` (FINDINGS "Where the per-shot neutral comes from"), camera-tested 2026-11-05 (`4359b04b…`: == the JPG).** Was parked 2026-10-21 (owner: fine with Lightroom WB;
   open for anyone to continue). State in FINDINGS "Per-shot white balance": the camera computes a
   per-shot neutral in JPG fine+RAW mode (JPG MakerNote 0x322–0x324, rationals `16384/x`, exactly the
   DNG form, which m8raw2dng2 copies); the camera's own DNG writer takes it from object+0x12D0
@@ -289,7 +289,7 @@ scratch-card playback test with our DNG (pair + lone copy) on the current build:
   compared on the desktop with the JPG's tags (one flash; then a one-slot change, room exists);
   (2) desktop script copying the JPG's 0x322–0x324 into the DNG (no flash, extra step);
   (3) preset → constant table (Auto stays daylight). The template already reserves the 24 bytes.
-- [ ] **Leica MakerNote (and body serial).** Copy the camera's 220-byte MakerNote (writer 0x6C630;
+- [ ] **Leica MakerNote (and body serial) — built 2026-11-05 in `dng --meta` (writer found: 0x6D400); camera-tested 2026-11-05 (L1032091–94: all tags but the WB == the JPG).** Copy the camera's 220-byte MakerNote (writer 0x6C630;
   "LEICA" header, tags 0x300–0x340 incl. body serial 0x303) into the EXIF IFD, as m8raw2dng2 does
   from the JPG. **Moderate.** Needs: where the finished MakerNote bytes (or their source values
   S+0x74–0x88) are in memory when the hook runs — again from a stage-3 dump — and ~250 bytes more

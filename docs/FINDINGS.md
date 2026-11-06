@@ -523,6 +523,111 @@ L1031919 (ISO 160, different scene). File-level evidence only; the firmware rout
   pattern of a 0x322 rational entry occurs in no lump. → **The JPG's MakerNote (with WB) is not built
   by the PXA tag writers**; most likely the Blackfin DSP (JPEG pipeline, auto WB). Where the neutral
   sits in PXA memory at hook time in JPG fine+RAW mode is unknown.
+- **Correction (2026-11-05): the JPG MakerNote is built by the PXA, at 0x6D400** (the scan above
+  missed it: it uses other tag helpers, 0x7590C int / 0x75A8C rational / 0x7589C, 0x7587C). Called
+  only from 0x6D628 ← 0x6D9B4 in 0x6D6AC (vtable word 0xED92C); S = `[obj+8]`. It writes "LEICA\0\0\0"
+  (0xE10B8) + 18 entries in exactly the JPG's order, from S: 0x300 byte +0xC6, 0x302 byte +0xBC,
+  **0x303 body serial +0xC8**, 0x304 u16 +0xA4, **0x310 lens code +0x9C**, 0x320 +0x134, 0x321 +0xC0,
+  **0x322 / 0x323 / 0x324 WB rationals +0xCC / +0xD4 / +0xDC**, 0x311 / 0x312 / 0x313 rationals +0x84 /
+  +0x7C / +0x74, 0x330–0x333 +0x138…+0x144, 0x340 +0x18 (+ blob). Same S offsets as 0x6C630.
+  If `[obj+8]` is the job's S (job+4) and is filled before the RAW's last block, the DNG hook can
+  copy all of these with plain loads (job offset = S offset + 4). To be confirmed on the camera
+  (the `--meta` build below carries its own job dump, so no separate stage 3 flash).
+- Camera DNG mode (L1032065.DNG) has a 220-byte, 15-entry MakerNote (0x6C630: no 0x300, 0x322–0x324;
+  0x325 instead), AsShotNeutral per shot and CameraSerialNumber 0xC62F; no LensModel. Every file so
+  far (author's camera) has lens code 0 and FocalLength 0: the lens was never identified by the body.
+
+### `dng --meta`: per-shot white balance + Leica MakerNote (2026-11-05, built, not flashed)
+
+- Pieces (`m8_dngpatch.META_PIECES`, replace `dng`'s ldimg + hook; `--meta` needs `dng`, combines
+  with `--info` / `--profiles` / `--dial-ev`; `META_BUILDS`, not in `BUILDS` until camera-tested):
+  - **meta code** `jpgipp` 0x26D98–0x27090 (debug command `writejpgipp`; refs from outside: only the
+    initializer's pointer 0x2DB8C): stub `mov r0,#0; bx lr`, then `meta_hook` 0x26DA0
+    (`tools/asm/m8_dngmeta.s`, 468 bytes): dng_hook's code without the dump mode, tables via
+    `ldr r8, =0x28AB8`, plus the WB step; rest `udf`.
+  - **meta** `ldimg`: stub (as dng), then tables at 0x28AB8: template length, slot count, BlackLevel
+    offset, ISO thresholds + base, u16 AsShotNeutral offset + u16 job offset 0xD0, 25 slots, template
+    1192 bytes (dng's 902 + EXIF 0x927C entry + 278-byte MakerNote laid out as the JPG's: 18 entries,
+    offsets from MakerNote+8, rationals in S order so 0x311–0x313 and 0x322–0x324 are one 24-byte copy
+    each; 14 MakerNote copies). One slot copies job+0..0x280 to trailing row +0x500 (desktop check of
+    the offsets; hidden like the template). 192 bytes free.
+  - **meta hook** 0x3C6A8 `b 0x3C5EC` → `bl 0x26DA0`.
+- AsShotNeutral = job+0xD0..0xE7 (S+0xCC, 3 rationals) only if none of the six words is 0; otherwise
+  the template's daylight neutral stays (the file always opens).
+- `dng --meta --profiles --dial-ev` = `32aa29f9ccca95fda767b0aff506a11385205ba3924349ecb134fc1cfd5c7162`:
+  m8_savetest 59/0 (both samples, four writer timings; DNG MakerNote == the sample JPG's, all 18 tags;
+  AsShotNeutral == its 0x322–0x324; any zero word → daylight; guards; BlackLevel 16 ISOs; writes only
+  the trailing row + stack; call trace == flashed). New code calls no firmware function and is reached
+  only from the hook, so boot / update paths stay byte-identical and unreachable from it.
+  Desktop equivalent: `m8_wrapdng.py X.RAW --meta` (LibRaw reads the per-shot WB, macOS decodes it).
+- Camera check: `tools/m8_metacheck.py fromcameraimports/L*.RAW` (DNG vs JPG, and where the JPG's
+  values are in the job dump if they differ).
+- **Camera test of `32aa29f9…` (2026-11-05) [tested]: MakerNote yes, white balance no.** L1032091–94
+  (JPG fine+RAW, one with a .BIA): 15/18 MakerNote tags == the JPG (S offsets confirmed, S = job+4);
+  0x322–0x324 and AsShotNeutral = **7000/10000, 10000/10000, 7000/10000** in every file (Lightroom
+  ≈ 3,700 K, tint −31; the JPGs ≈ 5,000 K, +26…+32). The job dump shows job+0xD0..0xE7 held this
+  default at the hook and the JPG's values nowhere in job+0..0x280: the neutral is not in the job
+  yet when the RAW's last block is written. The zero-word guard did not catch it (no zero).
+
+### Where the per-shot neutral comes from (static, 2026-11-05)
+
+- **0x3B430(job, kind)** writes it: asks the Blackfin for the 320×240 review image of buffer
+  `[job+0x26C]` (kind 0: 0x908D8, request 0x25 + LUT 5; else 0x90B7C, request 0x24), stores the
+  reply's neutral as job+0xD0..0xE7 = 16384/r, 16384/16384, 16384/b (one value, 0x3B5AC–0x3B5C4),
+  job+0xC4, job+0xE8..0x127, copies them to `[job+0x278]` (0x14BED4 in every dump), sets the
+  review-done byte 0x169BD4[idx] and returns the image (0x24C1CE0 + idx × 0x38400), or 0. A second
+  call for the same buffer returns the image without asking again (0x3B460).
+- **Who calls it:**
+  - The store routine 0x3CA58 at **0x3CB94**: `type = [ctx+0x4638]` (set from the job's flags,
+    checked DNG +0x150, JPG +0x14C, RAW +0x154 in that order: 2 DNG, 1 JPG, 0 RAW and .BIA). Only
+    for type ≠ 0 it calls 0x3B430(job, 0) at 0x3CC70, *before* the file's transfer (0x3CB9C on).
+    The result `[fp-0x68]` is read only by the JPG (0x3CF60, 0x7370C) and DNG (0x3CFCC, thumbnail)
+    writers, never on the RAW path (0x3CE48).
+  - 0x35620 (event 0x450, end of capture) with kind 1 when no other job is queued
+    (`[app+0x17E34]` = 0) and byte app+0x17E50 is set (setter 0x36640, from 0x4EA4C / 0x66C28 /
+    0x685B4).
+  - 0x3B888 (event 0x44D, 0x349C8) for the first job with state 3 whose RAW is done
+    (+0x154 = 2), not .BIA and not reviewed.
+- **So in JPG fine+RAW:** the RAW (type 0) is stored first without the request. The neutral reaches
+  the job afterwards, through 0x3B888 or the JPG's own store. In the dumps the job's flags are
+  JPG 0 (not ready), DNG 2, RAW 1. In **DNG+JPG mode** the DNG (type 2) makes the request before
+  its data, and the JPG then reuses it. The RAW and the DNG data come through the same transfer
+  path (0x3CB9C: 0x94E2C, 0x90C40, FPGA DMA).
+- The default 7000/10000… is not a literal in the PXA image: it comes with the metadata copy into
+  the job (0x424AC → 0x3B8EC).
+
+### `--meta` with the fetch (2026-11-05, camera-tested)
+
+- New piece **meta fetch** (region `fetch` 0x3CB98): stock `bne 0x3CC70` → `b 0x26F98`.
+  **raw_fetch** at 0x26F98 (in meta code, `.org 0x200`, 6 instructions + 2 literals):
+  - JPG / DNG (`ne`) → 0x3CC70, as stock.
+  - A RAW, not .BIA (`[job+0x21A]` = 0) → 0x3CC70 as well: the stock request 0x3B430(job, 0),
+    then the transfer. This is the DNG's order in DNG+JPG mode, and the JPG reuses the answer.
+  - .BIA → 0x3CB9C, as stock.
+  - r0 = 0 is kept; r1 is redefined on both paths; no stores; JPG / DNG / DNG+JPG modes run the
+    stock code.
+- The meta_hook WB guard is tighter: it copies the neutral only in 0x3B430's form (numerators
+  and green denominator 16384, R and B denominators non-zero). Otherwise the daylight neutral
+  stays, including when the request failed and the job default is still there.
+- Risk, for the camera test to show: the request is new *before a RAW*. In stock it runs before a
+  DNG's data, and after a RAW's.
+- m8_savetest models 0x3B430 (writes the neutral, returns the image) and checks for the meta builds:
+  - exactly one call, before the transfer; the rest of the trace == flashed;
+  - no call for .BIA;
+  - raw_fetch run directly for JPG / DNG / RAW / .BIA: the right target, registers, no writes;
+  - 15 guard cases;
+  - AsShotNeutral == the JPG's.
+- **Camera test of `dng --meta --profiles --dial-ev` = `4359b04b41dd81761730e79fde3b46a09044e908c55cdc56cd8d8add3288e905`
+  (2026-11-05) [tested]: works.** L1032095–99 (JPG fine+RAW, different light; the B/R ratios range
+  from 19006/33233 to 34048/24501):
+  - AsShotNeutral == the JPG's 0x322–0x324, and 18/18 MakerNote tags == the JPG (m8_metacheck);
+  - image data normal: no fill rows, 99.9th percentile ≤ 16383, out-of-range pixel counts like
+    the stock samples, luminance correlation with the JPG 0.93–0.98;
+  - the owner reports Lightroom's As Shot looks better.
+  - WB preset covered: L1032099 was shot on the Tungsten preset (Lightroom ≈ 2,700 K, tint −9; the
+    auto WB frames ≈ 4,900–5,000 K, tint +19…+32). MakerNote 0x300 is 1 in all five frames, so it is
+    not the WB mode.
+  - Not covered yet: a .BIA (long exposure).
 
 ## GUI: screen, fonts, keys, windows (static, 2026-10-23, research for an INFO screen)
 

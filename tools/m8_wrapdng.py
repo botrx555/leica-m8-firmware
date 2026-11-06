@@ -25,6 +25,7 @@ AsShotNeutral = fixed daylight (later a WB-preset table); BlackLevel = constant 
 by ISO gain, which the camera knows).
 
 Usage: python3 tools/m8_wrapdng.py in.RAW [out.DNG] [--black N (default 92, 0 = omit)] [-t template.bin]
+       [--meta: as `dng --meta`, the Leica MakerNote + AsShotNeutral from the JPG's MakerNote]
 """
 import os, struct, sys, time
 
@@ -56,9 +57,9 @@ def black_for_iso(iso, base=BLACK):
     return base * gain
 
 
-BYTE, ASCII, SHORT, LONG, RATIONAL, UNDEF, SRATIONAL = 1, 2, 3, 4, 5, 7, 10
-SIZE = {BYTE: 1, ASCII: 1, SHORT: 2, LONG: 4, RATIONAL: 8, UNDEF: 1, SRATIONAL: 8}
-FMT = {BYTE: 'B', SHORT: 'H', LONG: 'I'}
+BYTE, ASCII, SHORT, LONG, RATIONAL, UNDEF, SLONG, SRATIONAL = 1, 2, 3, 4, 5, 7, 9, 10
+SIZE = {BYTE: 1, ASCII: 1, SHORT: 2, LONG: 4, RATIONAL: 8, UNDEF: 1, SLONG: 4, SRATIONAL: 8}
+FMT = {BYTE: 'B', SHORT: 'H', LONG: 'I', SLONG: 'i'}
 
 DT0 = '0000:00:00 00:00:00'
 # Per-shot slots: (tag, name, type, default, where the camera holds it). Defaults as the camera's
@@ -77,7 +78,43 @@ SHOT_FIELDS = [
     (50728, 'AsShotNeutral',     RATIONAL,  DAYLIGHT_NEUTRAL, 'WB preset table'),
 ]
 SLOT_TAGS = {tag: (name, typ) for tag, name, typ, _, _ in SHOT_FIELDS}
-EXIF_TAGS = {33434, 34850, 34855, 36864, 36867, 36868, 37377, 37380, 37381, 37386}
+EXIF_TAGS = {33434, 34850, 34855, 36864, 36867, 36868, 37377, 37380, 37381, 37386, 37500}
+
+# `--meta` (FINDINGS "Per-shot white balance"): the Leica MakerNote as the camera writes it into its
+# JPG (0x6D400): "LEICA\0\0\0", 18 entries, value offsets counted from MakerNote start + 8.
+# (tag, type, S offset, bytes copied from S; the rest of a value stays 0.)
+MAKER_FIELDS = [
+    (0x300, SHORT, 0xC6, 1), (0x302, LONG, 0xBC, 1), (0x303, LONG, 0xC8, 4),      # 0x303 body serial
+    (0x304, SHORT, 0xA4, 2), (0x310, LONG, 0x9C, 4),                               # 0x310 lens code
+    (0x311, RATIONAL, 0x84, 8), (0x312, RATIONAL, 0x7C, 8), (0x313, RATIONAL, 0x74, 8),   # meter values
+    (0x320, SLONG, 0x134, 4), (0x321, LONG, 0xC0, 4),
+    (0x322, RATIONAL, 0xCC, 8), (0x323, RATIONAL, 0xD4, 8), (0x324, RATIONAL, 0xDC, 8),   # per-shot WB
+    (0x330, LONG, 0x138, 4), (0x331, LONG, 0x13C, 4), (0x332, LONG, 0x140, 4), (0x333, LONG, 0x144, 4),
+    (0x340, LONG, 0x18, 4)]
+NEUTRAL_S = 0xCC        # AsShotNeutral = the camera's neutral, S+0xCC (3 rationals 16384/x), if no word is 0
+
+
+def maker_blob():
+    """(MakerNote bytes, [(offset in the MakerNote, S offset, length)]): the per-shot copies. The
+    rationals are stored in S order, so 0x311-0x313 and 0x322-0x324 are one copy each."""
+    n = len(MAKER_FIELDS)
+    head = 8 + 2 + 12 * n + 4
+    rats = sorted((s, tag) for tag, typ, s, _ in MAKER_FIELDS if typ == RATIONAL)
+    at = {tag: head + 8 * i for i, (_, tag) in enumerate(rats)}
+    blob, copies = bytearray(b'LEICA\0\0\0' + struct.pack('<H', n)), []
+    for tag, typ, s, nb in MAKER_FIELDS:
+        if typ == RATIONAL:
+            blob += struct.pack('<HHII', tag, typ, 1, at[tag] - 8)
+        else:
+            copies.append((len(blob) + 8, s, nb))
+            blob += struct.pack('<HHII', tag, typ, 1, 0)
+    blob += bytes(4 + 8 * len(rats))
+    for i, (s, _) in enumerate(rats):                   # merge rationals contiguous in S
+        if i and copies[-1][1] + copies[-1][2] == s and copies[-1][0] + copies[-1][2] == head + 8 * i:
+            copies[-1] = (copies[-1][0], copies[-1][1], copies[-1][2] + 8)
+        else:
+            copies.append((head + 8 * i, s, 8))
+    return bytes(blob), copies
 
 
 def pack_value(typ, v):
@@ -91,10 +128,13 @@ def pack_value(typ, v):
     return struct.pack('<%d%s' % (len(v), FMT[typ]), *v)
 
 
-def build_template(black=BLACK):
-    """Return (template bytes, {slot name: (offset in template, length, type)})."""
+def build_template(black=BLACK, maker=False):
+    """Return (template bytes, {slot name: (offset in template, length, type)}); maker=True adds
+    the Leica MakerNote to the EXIF IFD (slot 'MakerNote')."""
     shot = [(tag, typ, default) for tag, _, typ, default, _ in SHOT_FIELDS]
     exif = [(36864, UNDEF, b'0220')] + [e for e in shot if e[0] in EXIF_TAGS]   # ExifVersion + slots
+    if maker:
+        exif.append((37500, UNDEF, maker_blob()[0]))
     ifd0 = [
         (254, LONG, 0),                                          # main image = raw
         (256, LONG, W), (257, LONG, H),
@@ -141,6 +181,8 @@ def build_template(black=BLACK):
                 slots[name] = (where, len(raw), typ)
             elif tag == 50714:                                  # per-ISO black level (computed)
                 slots['BlackLevel'] = (where, len(raw), typ)
+            elif tag == 37500:
+                slots['MakerNote'] = (where, len(raw), typ)
             blob += struct.pack('<HHI', tag, typ, count) + field
         return blob + struct.pack('<I', next_ifd)
 
@@ -183,18 +225,63 @@ def check(dng, raw):
     return n
 
 
-def jpg_shot(path):
-    """Desktop stand-in for S: the per-shot slot values from the camera's own JPG EXIF."""
+def read_maker(buf, off):
+    """{tag: (type, value bytes)} of the Leica MakerNote at buf[off] (offsets from off + 8)."""
+    assert buf[off:off + 8] == b'LEICA\0\0\0', 'no LEICA MakerNote'
+    out = {}
+    for k in range(struct.unpack_from('<H', buf, off + 8)[0]):
+        e = off + 10 + 12 * k
+        tag, typ, cnt, val = struct.unpack_from('<HHII', buf, e)
+        n = SIZE[typ] * cnt
+        out[tag] = (typ, bytes(buf[e + 8:e + 8 + n] if n <= 4 else buf[off + 8 + val:off + 8 + val + n]))
+    return out
+
+
+def tiff_maker(t):
+    """The Leica MakerNote of a little-endian TIFF (IFD0 -> EXIF IFD -> 0x927C), or {}."""
+    def entries(off):
+        return [struct.unpack_from('<HHII', t, off + 2 + 12 * k) for k in range(struct.unpack_from('<H', t, off)[0])]
+    exif = [v for tag, _, _, v in entries(struct.unpack_from('<I', t, 4)[0]) if tag == 34665]
+    mn = [v for tag, _, _, v in entries(exif[0]) if tag == 37500] if exif else []
+    return read_maker(t, mn[0]) if mn else {}
+
+
+def fill_maker(template, slots, maker):
+    """Template with the MakerNote values and AsShotNeutral of `maker` ({tag: (type, bytes)}, e.g.
+    from the camera's JPG) -- placed by reading the template's own MakerNote entries."""
+    t = bytearray(template)
+    off = slots['MakerNote'][0]
+    for k in range(struct.unpack_from('<H', t, off + 8)[0]):
+        e = off + 10 + 12 * k
+        tag, typ, cnt, val = struct.unpack_from('<HHII', t, e)
+        v = maker[tag][1]
+        assert maker[tag][0] == typ and len(v) == SIZE[typ] * cnt, f'MakerNote 0x{tag:X}'
+        at = e + 8 if len(v) <= 4 else off + 8 + val
+        t[at:at + len(v)] = v
+    wb = b''.join(maker[tag][1] for tag in (0x322, 0x323, 0x324))
+    if all(struct.unpack('<6I', wb)):
+        w, n, _ = slots['AsShotNeutral']
+        t[w:w + n] = wb
+    return bytes(t)
+
+
+def jpg_tiff(path):
+    """The TIFF data of a JPG's Exif APP1, or None."""
     d = open(path, 'rb').read()
     i = 2
     while i + 4 < len(d) and d[i] == 0xFF:
         n = struct.unpack('>H', d[i + 2:i + 4])[0]
         if d[i + 1] == 0xE1 and d[i + 4:i + 10] == b'Exif\0\0':
-            break
+            return d[i + 10:i + 2 + n]
         i += 2 + n
-    else:
+    return None
+
+
+def jpg_shot(path):
+    """Desktop stand-in for S: the per-shot slot values from the camera's own JPG EXIF."""
+    t = jpg_tiff(path)
+    if t is None:
         return {}
-    t = d[i + 10:i + 2 + n]
     e = '<' if t[:2] == b'II' else '>'
     want = {tag: name for tag, (name, _) in SLOT_TAGS.items()}
     out = {}
@@ -223,14 +310,20 @@ def main():
         i = args.index('--black'); black = int(args[i + 1]); del args[i:i + 2]
     if '-t' in args:
         i = args.index('-t'); tpl_out = args[i + 1]; del args[i:i + 2]
+    meta = '--meta' in args
+    args = [a for a in args if a != '--meta']
     if not args:
         raise SystemExit(__doc__)
     src = args[0]
     dst = args[1] if len(args) > 1 else os.path.splitext(src)[0] + '.DNG'
     raw = open(src, 'rb').read()
-    template, slots = build_template(black)
+    template, slots = build_template(black, maker=meta)
     jpg = os.path.splitext(src)[0] + '.JPG'
     shot = jpg_shot(jpg) if os.path.exists(jpg) else {}
+    if meta:
+        if not os.path.exists(jpg):
+            raise SystemExit('--meta needs the same-stem .JPG (MakerNote values)')
+        template = fill_maker(template, slots, tiff_maker(jpg_tiff(jpg)))
     if 'DateTime' not in shot:   # no JPG: RAW mtime stands in for the camera clock
         when = time.strftime('%Y:%m:%d %H:%M:%S', time.localtime(os.path.getmtime(src)))
         shot.update(DateTime=when, DateTimeOriginal=when, DateTimeDigitized=when)

@@ -11,6 +11,9 @@ append 0x8817C, 0x90064, memcpy 0xB3F78, division/modulo 0xCAB28-0xCAE54.
 
 Modelled in Python (everything else is a test failure):
   - eCos mutex/flag calls (0xB4998, 0xB49A0, 0xB48BC setbits, 0xB48C0 maskbits, 0xB48C4 wait);
+  - 0x3B430 (review image + per-shot neutral from the Blackfin; reached only through --meta's
+    raw_fetch): writes the sample JPG's neutral to job+0xD0 as 16384/x, as 0x3B430 does. Before
+    it the job holds the default 7000/10000 seen on the camera (L1032091-94);
   - sensor/FPGA/GPIO control (0x94E2C, 0x94E98, 0x90C40, 0x90F2C), event post 0x98324,
     0x716F8 (resets the ctx+0x47C0 object at end of file);
   - geometry 0x90F9C (cached sensor table): RAW = 3976 samples x 2647 rows;
@@ -27,9 +30,9 @@ writes by the header block (0x3CE48-0x3CF20) same addresses as the flashed build
 trace identical to the flashed build, only the type-0 path reaches the header block,
 settings loader/menu unchanged (m8_emutest), declared-regions diff (m8_dngpatch).
 
-Usage:  work/venv/bin/python tools/m8_savetest.py [--build raw-menu|dng [--info|--profiles] [--dial-ev]]
+Usage:  work/venv/bin/python tools/m8_savetest.py [--build raw-menu|dng [--meta] [--info|--profiles] [--dial-ev]]
                                                   [--stage N] [--quick] [-v]
-        (default: the 12 builds + the diagnostic builds 1, 2, 3, 5 (canary, idle, dump, .DNG names);
+        (default: the 12 builds, the 6 dng --meta builds + the diagnostic builds 1, 2, 3, 5 (canary, idle, dump, .DNG names);
         --stage N: a history / old stage number; --quick = one sample, one drain policy)
 """
 import hashlib, os, struct, sys, time
@@ -60,9 +63,12 @@ REAL = [
     (0xB3F78, 0xB40D4),     # memcpy
     (0xCAB28, 0xCAE54),     # unsigned divide / modulo
     (0x28AB0, dp.TABLES),   # new code (stages 3-5 reach it through the hook)
+    dp.REGIONS['jpgipp'],   # new code of --meta (meta_hook; its tables are in ldimg)
 ]
 HEADER = dp.REGIONS['header']
 NEW_CODE = (0x28AB0, dp.TABLES)
+META_CODE = dp.REGIONS['jpgipp']
+META_LITERAL = META_CODE[0] + dp.META_CODE.index(struct.pack('<I', dp.META_TABLES))   # meta_hook's `ldr r8, =TABLES`
 TRAIL_OFF = HDR + (ROWS - 1) * ROW_BYTES     # file offset of the trailing sensor row (IFD0)
 DMA_BUF, DMA_PARITY = 0x026F44E0, 0x3E080   # CPU view of the DMA target (phys 0xA26F44E0)
 PHYS = 0xA0000000                            # SDRAM physical base; CPU address = phys - PHYS
@@ -143,7 +149,7 @@ class SaveEmu(et.Emu):
             0xB48BC: flag_set, 0xB48C0: flag_mask, 0xB48C4: self.writer.wait,
             0x98324: 'event_post_98324', 0x94E2C: 'sensor_94e2c', 0x94E98: 'sensor_94e98',
             0x90C40: 'fpga_cmd_90c40', 0x90F2C: 'fpga_90f2c', 0x716F8: 'reset_obj_716f8',
-            0x90F9C: geometry,
+            0x90F9C: geometry, 0x3B430: wb_fetch,
             SENT + 0x08: 'writer_open', SENT + 0x0C: 'writer_start',
             SENT + 0x10: self.writer.kick, SENT + 0x18: self.writer.finish,
         }
@@ -159,7 +165,7 @@ class SaveEmu(et.Emu):
         self.new_entries = 0                    # times dng_hook was entered
 
     def _code(self, uc, addr, size, _):
-        if addr == dp.HOOK_ENTRY:
+        if addr in (dp.HOOK_ENTRY, dp.META_ENTRY):
             self.new_entries += 1
         super()._code(uc, addr, size, _)
 
@@ -169,7 +175,7 @@ class SaveEmu(et.Emu):
             pc = uc.reg_read(UC_ARM_REG_PC)
             if HEADER[0] <= pc < HEADER[1]:
                 self.hdr_writes.append((addr, size, value & ((1 << 8 * size) - 1)))
-            elif NEW_CODE[0] <= pc < NEW_CODE[1]:
+            elif NEW_CODE[0] <= pc < NEW_CODE[1] or META_CODE[0] <= pc < META_CODE[1]:
                 self.new_writes.append((addr, size))
 
     def _dma(self, uc, access, addr, size, value, _):
@@ -223,6 +229,7 @@ def save(pxa, raw, policy='eager', bia=False, iso=None):
     e.uc.mem_write(JOB + 0x21A, bytes([bia]))
     e.w32(JOB + 0x210, 1)                       # header u16[16..18] (sample: 1, 0, 0)
     fill_shot(e, iso)
+    e.uc.mem_write(JOB + 0xD0, JOB_DEFAULT_WB)  # filled only by 0x3B430
     # message: +8 job, +0xC writer
     e.w32(MSG + 8, JOB)
     e.w32(MSG + 0xC, W)
@@ -243,13 +250,27 @@ def save(pxa, raw, policy='eager', bia=False, iso=None):
 SHOT = {'DateTime': '0000:00:00 00:00:00', **wd.jpg_shot(os.path.join(ROOT, 'sampleraws/L1031902.JPG'))}
 SHOT.update(DateTimeOriginal=SHOT['DateTime'], DateTimeDigitized=SHOT['DateTime'])
 SETTINGS_PATTERN = bytes(range(256)) * 2        # stands in for the settings block (dump check)
+# --meta: the sample JPG's MakerNote values, put into S at the offsets 0x6D400 reads them from
+MAKER = wd.tiff_maker(wd.jpg_tiff(os.path.join(ROOT, 'sampleraws/L1031902.JPG')))
 
 
-def fill_shot(e, iso=None):
+JOB_DEFAULT_WB = struct.pack('<6I', 7000, 10000, 10000, 10000, 7000, 10000)   # job+0xD0 before 0x3B430
+
+
+def wb_fetch(e, job, kind, _):
+    """0x3B430(job, kind): the neutral as the Blackfin returns it (the sample JPG's 0x322-0x324)."""
+    assert (job, kind) == (JOB, 0), f'0x3B430({job:#x}, {kind})'
+    e.uc.mem_write(JOB + 0xD0, b''.join(MAKER[t][1] for t in (0x322, 0x323, 0x324)))
+    return 0x24C1CE0                            # review image (the RAW path ignores it)
+
+
+def fill_shot(e, iso=None, maker=MAKER):
     shot = dict(SHOT, **({} if iso is None else {'ISO': iso}))
     for _, name, typ, _, where in wd.SHOT_FIELDS:
         if where.startswith('S+'):
             e.uc.mem_write(JOB + 4 + int(where[2:], 16), wd.pack_value(typ, shot[name]))
+    for tag, _, off, n in wd.MAKER_FIELDS:
+        e.uc.mem_write(JOB + 4 + off, maker[tag][1][:n])
     e.uc.mem_write(e.u32(et.P_SETTINGS), SETTINGS_PATTERN)
 
 
@@ -274,17 +295,22 @@ def expected(pieces, raw, e, iso=None):
             e.read(e.u32(et.P_SETTINGS), 0x200)
         out[TRAIL_OFF:TRAIL_OFF + len(dump)] = dump
     if 'tiff' in pieces:
-        t, slots = dp.template()
+        t, slots = dp.meta_template() if 'meta' in pieces else dp.template()
         shot = {k: v for k, v in SHOT.items() if k in dict(
             (n, 1) for n, *_ in dp.slot_table())}
         if iso is not None:
             shot['ISO'] = iso
         shot['BlackLevel'] = wd.black_for_iso(shot['ISO'])
+        if 'meta' in pieces:                              # MakerNote + AsShotNeutral from the JPG's values
+            t = wd.fill_maker(t, slots, MAKER)
         out = bytearray(wd.wrap(raw, t, slots, shot))
+        if 'meta' in pieces:                              # job+0..0x280 behind the template
+            out[TRAIL_OFF + dp.DUMP_AT:TRAIL_OFF + dp.DUMP_AT + dp.DUMP_LEN] = e.read(JOB, dp.DUMP_LEN)
     return bytes(out)
 
 
-def run_hook(pxa, size, idx, bia=False, row_bytes=ROW_BYTES, rows=ROWS, iso=None):
+def run_hook(pxa, size, idx, bia=False, row_bytes=ROW_BYTES, rows=ROWS, iso=None, maker=MAKER,
+             entry=dp.HOOK_ENTRY):
     """Call dng_hook directly as the producer's `bl` would; returns (emu, regs preserved?)."""
     from unicorn.arm_const import (UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7,
                                    UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11,
@@ -295,17 +321,44 @@ def run_hook(pxa, size, idx, bia=False, row_bytes=ROW_BYTES, rows=ROWS, iso=None
     e.w32(CTX + 0x4220, idx)
     e.w32(CTX + 0x4228, row_bytes)
     e.w32(CTX + 0x422C, rows)
-    fill_shot(e, iso)
+    fill_shot(e, iso, maker)
     keep = [UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9,
             UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_SP]
     vals = [CTX, 0x5555, 0x6666, size, 0x8888, 0x9999, 0xAAAA, 0xBBBB, et.STACK + 0xF000]
     for r, v in zip(keep, vals):
         e.uc.reg_write(r, v)
     e.uc.reg_write(UC_ARM_REG_LR, et.SENTINEL + 0xC0)    # dng_hook returns to lr - 0xC0
-    e.uc.emu_start(dp.HOOK_ENTRY, et.SENTINEL, count=100_000)
+    e.uc.emu_start(entry, et.SENTINEL, count=100_000)
     if e.err or e.uc.reg_read(UC_ARM_REG_PC) != et.SENTINEL:
         raise et.Escape(e.err or 'dng_hook did not return')
     return e, [e.uc.reg_read(r) for r in keep] == vals
+
+
+def run_fetch(pxa, typ, bia):
+    """raw_fetch entered by 0x3CB98's `b` after `cmp type, #0`: (pc reached, regs kept, writes)."""
+    from unicorn.arm_const import UC_ARM_REG_CPSR, UC_ARM_REG_R0, UC_ARM_REG_R2
+    e = SaveEmu(pxa, b'')
+    e.w32(CTX + 0x4634, JOB)
+    e.uc.mem_write(JOB + 0x21A, bytes([bia]))
+    regs = list(range(UC_ARM_REG_R0, UC_ARM_REG_R0 + 13))           # r0-r12
+    vals = [0, JOB, 0x2222, typ, 0x4444, 0x5555, 0x4634, CTX, 0x8888, 0x9999, 0xAAAA, 0xBBBB, 0xCCCC]
+    for r, v in zip(regs, vals):
+        e.uc.reg_write(r, v)
+    cpsr = e.uc.reg_read(UC_ARM_REG_CPSR) & ~(1 << 30)
+    e.uc.reg_write(UC_ARM_REG_CPSR, cpsr | ((typ == 0) << 30))    # Z of `cmp type, #0`
+    stop = 0x3CB9C if bia and typ == 0 else 0x3CC70
+    e.uc.emu_start(dp.META_FETCH, stop, count=8)
+    kept = [e.uc.reg_read(r) for r in regs]
+    kept = kept[:1] + kept[2:] == vals[:1] + vals[2:]               # r1 is redefined on both paths
+    return e.uc.reg_read(UC_ARM_REG_PC), kept, e.new_writes
+
+
+def neutral(dng):
+    """AsShotNeutral of a DNG as [(num, den)] x 3."""
+    for k in range(struct.unpack_from('<H', dng, TRAIL_OFF)[0]):
+        tag, typ, cnt, val = struct.unpack_from('<HHII', dng, TRAIL_OFF + 2 + 12 * k)
+        if tag == 50728:
+            return [struct.unpack_from('<II', dng, val + 8 * i) for i in range(cnt)]
 
 
 def outside(writes, lo, hi):
@@ -337,7 +390,8 @@ def main():
     verbose = '-v' in sys.argv
     quick = '--quick' in sys.argv
     # targets: (label, pieces, title)
-    targets = [(dp.build_name(*b), dp.build_pieces(*b), 'build ' + dp.build_name(*b)) for b in dp.BUILDS]
+    targets = [(dp.build_name(*b), dp.build_pieces(*b), 'build ' + dp.build_name(*b))
+               for b in dp.BUILDS + dp.META_BUILDS]
     targets += [(f'stage{n}', dp.HISTORY[n][1], f'stage {n}: {dp.HISTORY[n][0]}') for n in (1, 2, 3, 5)]
     if '--stage' in sys.argv:
         n = int(sys.argv[sys.argv.index('--stage') + 1])
@@ -345,14 +399,14 @@ def main():
     if '--build' in sys.argv:
         i = sys.argv.index('--build') + 1
         flags = []
-        while i < len(sys.argv) and sys.argv[i] in ('raw-menu', 'dng', '--info', '--profiles', '--dial-ev'):
+        while i < len(sys.argv) and sys.argv[i] in ('raw-menu', 'dng', '--meta', '--info', '--profiles', '--dial-ev'):
             flags.append(sys.argv[i])
             i += 1
         option = [f for f in flags if not f.startswith('--')]
         screen = [f[2:] for f in flags if f in ('--info', '--profiles')]
         if len(option) != 1 or len(screen) > 1:
             raise SystemExit(__doc__)
-        b = (option[0], screen[0] if screen else None, '--dial-ev' in flags)
+        b = (option[0], screen[0] if screen else None, '--dial-ev' in flags, '--meta' in flags)
         targets = [(dp.build_name(*b), dp.build_pieces(*b), 'build ' + dp.build_name(*b))]
     R = et.Results(verbose)
     stock_upd = open(os.path.join(ROOT, 'firmware/stock/m8-2_014.upd'), 'rb').read()
@@ -400,19 +454,24 @@ def main():
 
     R.check('frozen code == reassembled tools/asm sources',
             (m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_header.s')) == dp.HEADER_TIFF,
-             m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_dnghook.s')) == dp.HOOK_CODE), (True, True))
+             m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_dnghook.s')) == dp.HOOK_CODE,
+             m8_asm.assemble(os.path.join(ROOT, 'tools/asm/m8_dngmeta.s')) == dp.META_CODE), (True, True, True))
     R.check('branches/pointers into the new code (flashed build)',
             [hex(a) for a in branches_into(flashed, *NEW_CODE)], ['0x2dd48'])
     bia_ref = save(flashed, raws[samples[0]], 'eager', bia=True)
 
     for b, pieces, title in targets:
         pxa = builds[b]
-        hooked = 'hook' in pieces
+        meta = 'meta' in pieces
+        hooked = 'hook' in pieces or meta
         print(title)
         R.check(f'{b} branches/pointers into the header block',
                 [hex(a) for a in branches_into(pxa, *HEADER)], ['0x3cd58'])
         R.check(f'{b} branches/pointers into the new code',
-                [hex(a) for a in branches_into(pxa, *NEW_CODE)], ['0x2dd48'] + ['0x3c6a8'] * hooked)
+                [hex(a) for a in branches_into(pxa, *NEW_CODE)],
+                sorted(['0x2dd48'] + ['0x3c6a8'] * (hooked and not meta) + [hex(META_LITERAL)] * meta))
+        R.check(f'{b} branches/pointers into writejpgipp',
+                [hex(a) for a in branches_into(pxa, *META_CODE)], ['0x2db8c'] + ['0x3c6a8', '0x3cb98'] * meta)
         ext = b'DNG' if 'ext' in pieces else b'RAW'
         for s, raw in raws.items():
             for pol in policies if s == samples[0] else ['eager']:
@@ -427,7 +486,10 @@ def main():
                 if pol == 'eager' and s == samples[0]:
                     f = ref['flashed', s]
                     R.check(f'{b} file name', e.name, (DIR + ext).decode())
-                    R.check(f'{b} call trace == flashed', e.calls == f.calls, True)
+                    R.check(f'{b} call trace == flashed' + (' + 0x3B430 before the transfer' if meta else ''),
+                            ([c for c in e.calls if c != 'wb_fetch'] == f.calls, e.calls.count('wb_fetch'),
+                             e.calls.index('wb_fetch') < e.calls.index('sensor_94e2c') if meta else True),
+                            (True, int(meta), True))
                     R.check(f'{b} header-block write addresses == flashed ({len(f.hdr_writes)} writes)',
                             sorted((a, z) for a, z, _ in e.hdr_writes) == sorted((a, z) for a, z, _ in f.hdr_writes),
                             True)
@@ -436,6 +498,11 @@ def main():
                     if 'tiff' in pieces:
                         t = wd.check(out, raw)
                         R.check(f'{b} DNG structure check (m8_wrapdng.check): IFD0 tags', t, 35)
+                    if meta:
+                        R.check(f'{b} DNG MakerNote == the JPG\'s (18 tags, type and value)',
+                                wd.tiff_maker(out) == MAKER and len(MAKER) == 18, True)
+                        R.check(f'{b} DNG AsShotNeutral == JPG MakerNote 0x322-0x324',
+                                neutral(out), [struct.unpack('<II', MAKER[t][1]) for t in (0x322, 0x323, 0x324)])
         # .BIA (dark frame): same type-0 header code, hook skips it
         e = save(pxa, raws[samples[0]], 'eager', bia=True)
         want = bytearray(bia_ref.writer.out)
@@ -443,11 +510,17 @@ def main():
             want[6] = 0xA5
         if 'tiff' in pieces:
             want[:8] = b'II*\0' + struct.pack('<I', TRAIL_OFF)
-        R.check(f'{b} .BIA: name, == expected, new-code runs, writes other than its stack',
-                (e.name, bytes(e.writer.out) == bytes(want), e.new_entries, outside(e.new_writes, 0, 0)),
-                ((DIR + b'BIA').decode(), True, int(hooked), []))
+        R.check(f'{b} .BIA: name, == expected, new-code runs, writes other than its stack, 0x3B430 calls',
+                (e.name, bytes(e.writer.out) == bytes(want), e.new_entries, outside(e.new_writes, 0, 0),
+                 e.calls.count('wb_fetch')), ((DIR + b'BIA').decode(), True, int(hooked), [], 0))
+        # raw_fetch (--meta), run directly from 0x3CB98's flags: JPG / DNG and RAW -> 0x3CC70, .BIA -> 0x3CB9C
+        if meta:
+            got = [run_fetch(pxa, typ, bia) for typ, bia in ((1, 0), (2, 0), (0, 0), (0, 1), (1, 1))]
+            R.check(f'{b} raw_fetch: (pc, regs kept, writes) for JPG, DNG, RAW, .BIA, JPG+BIA flag', got,
+                    [(0x3CC70, True, [])] * 3 + [(0x3CB9C, True, []), (0x3CC70, True, [])])
         # dng_hook guards, called directly (the code is present from stage 2 on)
-        if 'ldimg' in pieces or 'ldimg (dump)' in pieces:
+        if 'ldimg' in pieces or 'ldimg (dump)' in pieces or meta:
+            entry = dp.META_ENTRY if meta else dp.HOOK_ENTRY
             last, size = 165, 7 * ROW_BYTES
             cases = [('normal', dict(size=size, idx=last), True),
                      ('even block', dict(size=size, idx=164), True),
@@ -457,21 +530,40 @@ def main():
                      ('size 0 (dest below buffer)', dict(size=0, idx=164), False),
                      ('size 1 MB (dest above buffer)', dict(size=0x100000, idx=last), False)]
             for label, kw, writes in cases:
-                e, kept = run_hook(pxa, **kw)
+                e, kept = run_hook(pxa, entry=entry, **kw)
                 dst = trail_dest(kw['idx']) - (ROWS - kw['idx'] * 16) * ROW_BYTES + kw['size']
                 dma = [w for w in e.new_writes if not et.STACK <= w[0] < et.STACK + 0x10000]
                 R.check(f'{b} dng_hook {label}: regs kept, writes, outside trailing row',
                         (kept, bool(dma), outside(e.new_writes, dst, dst + ROW_BYTES)), (True, writes, []))
         # BlackLevel per ISO (mode 2): dng_hook called directly, value read from the trailing row
-        if 'ldimg' in pieces:
+        if 'ldimg' in pieces or meta:
             boff = dp.black_table()[0]
             bad = []
             for iso in (0, 100, 160, 226, 227, 320, 452, 453, 640, 905, 906, 1250, 1810, 1811, 2500, 6400):
-                e, kept = run_hook(pxa, 7 * ROW_BYTES, 165, iso=iso)
+                e, kept = run_hook(pxa, 7 * ROW_BYTES, 165, iso=iso, entry=entry)
                 got = e.u16(trail_dest(165) + boff)
                 if not kept or got != wd.black_for_iso(iso):
                     bad.append((iso, got, wd.black_for_iso(iso)))
             R.check(f'{b} BlackLevel for 16 ISOs == m8_wrapdng.black_for_iso (iso, got, want)', bad, [])
+        # AsShotNeutral (--meta): the camera's neutral only in 0x3B430's form (16384/r, 16384/16384,
+        # 16384/b, r and b non-zero); anything else (job default, a zero, another scale): daylight
+        if meta:
+            woff = dp.meta_template()[1]['AsShotNeutral'][0]
+            wb = list(struct.unpack('<6I', b''.join(MAKER[t][1] for t in (0x322, 0x323, 0x324))))
+            day = [x for r in wd.DAYLIGHT_NEUTRAL for x in r]
+            cases = [('the JPG\'s neutral', wb, True),
+                     ('job default 7000/10000', list(struct.unpack('<6I', JOB_DEFAULT_WB)), False),
+                     ('scale 8192', [8192, wb[1], 8192, 8192, 8192, wb[5]], False)]
+            cases += [(f'word {k} zero', wb[:k] + [0] + wb[k + 1:], False) for k in range(6)]
+            cases += [(f'word {k} = 16385', wb[:k] + [16385] + wb[k + 1:], False) for k in (0, 2, 3, 4)]
+            for label, words, camera in cases:
+                m = dict(MAKER)
+                m.update({t: (5, struct.pack('<2I', *words[2 * i:2 * i + 2]))
+                          for i, t in enumerate((0x322, 0x323, 0x324))})
+                e, kept = run_hook(pxa, 7 * ROW_BYTES, 165, maker=m, entry=entry)
+                got = list(struct.unpack('<6I', e.read(trail_dest(165) + woff, 24)))
+                R.check(f'{b} AsShotNeutral, {label}: ' + ('camera neutral' if camera else 'daylight'),
+                        (kept, got), (True, words if camera else day))
         if 'tiff' in pieces:
             raw = raws[samples[0]]
             e = save(pxa, raw, 'eager', iso=1250)

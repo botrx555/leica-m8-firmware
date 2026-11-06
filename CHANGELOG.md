@@ -14,6 +14,15 @@ Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't 
   `--stage N`, the old numbers of regular builds as aliases. `m8_savetest.py --build …` tests one
   build; by default it tests all 12 plus the diagnostic builds. Every build's bytes and hash are
   unchanged.
+- Developers, not offered by `m8patch.py` yet: `--meta` add-on for `dng`. Each DNG gets the
+  camera's per-shot white balance (AsShotNeutral, so Lightroom's "As Shot" matches the JPG, auto
+  or preset) and the Leica MakerNote (the JPG's 18 tags).
+  - In JPG fine+RAW the camera asks the Blackfin for the white balance only after the RAW. The new
+    `meta fetch` piece makes the RAW ask first, as a DNG does in DNG+JPG mode.
+  - `dng --meta --profiles --dial-ev` (`4359b04b…`) was camera-tested 2026-11-05.
+  - Not tested yet: a long exposure with a .BIA dark frame.
+  - New tools: `tools/asm/m8_dngmeta.s`, `tools/m8_metacheck.py` (checks camera files against
+    their JPGs), `m8_wrapdng.py --meta`.
 
 ## v0.6.0 — 2026-11-02
 

@@ -15,6 +15,12 @@ is. `.DNG` names (old stage 5) broke in-camera review, so the files stay `.RAW`.
   power-off (`d7a17ef2…`, 2026-10-27);
 - `--dial-ev`: rear dial sets exposure compensation (Leica's dormant ⅓ EV step, shown on the rear
   screen, closes after 2 s or any key; `1254b743…` = `dng --profiles --dial-ev`, 2026-11-02).
+- `--meta` (with `dng`): per-shot white balance + Leica MakerNote; code in `writejpgipp`
+  (0x26D98), tables in `ldimg`. First version flashed 2026-11-05: MakerNote OK, WB not (the neutral
+  isn't in the job yet at the RAW). Now with piece `meta fetch` (0x3CB98: a RAW asks for the neutral
+  first, as a DNG does): **camera-tested 2026-11-05** as `dng --meta --profiles --dial-ev`
+  (`4359b04b…`, WB + MakerNote == the JPG); still `META_BUILDS`, dev tool only (`m8patch.py`
+  doesn't offer it yet).
 12 builds (`m8_dngpatch.BUILDS`); **owner's decision 2026-11-02: a build may ship when every piece is
 camera-tested**, pieces byte-identical to those builds and regions disjoint (`tools/m8_combotest.py`).
 A new or changed piece needs its own camera test. **Author's camera: `dng --profiles --dial-ev`
@@ -50,7 +56,7 @@ For Goal 2, read `docs/DNG_PLAN.md` — the agreed approach, tag list, constrain
   `work/venv/bin/python tools/m8_infotest.py [-v]`
 - `tools/m8_inforender.py` — INFO screens (old number 8 = `dng --info`; `--stage 7`/`10`/`11`/`13`/`14`): runs the real GUI paint code, writes PNGs + checks (~2 s):
   `work/venv/bin/python tools/m8_inforender.py [image.JPG] [--stage 7|8|10] [--out DIR] [-v]`
-- `tools/asm/` — assembly sources of the new code (`m8_header.s`, `m8_dnghook.s`, `m8_info.s`, `m8_infoscreens.s`, `m8_infostats.s`, `m8_infoprofile.s`, `m8_infopicker.s`, `m8_infoev.s`); `tools/m8_asm.py X.s`
+- `tools/asm/` — assembly sources of the new code (`m8_header.s`, `m8_dnghook.s`, `m8_dngmeta.s`, `m8_info.s`, `m8_infoscreens.s`, `m8_infostats.s`, `m8_infoprofile.s`, `m8_infopicker.s`, `m8_infoev.s`); `tools/m8_asm.py X.s`
   assembles one and prints bytes + SHA-256 (the patch script carries the frozen bytes).
 - `tools/m8_combotest.py` — all 12 m8patch builds: hash, == build_file, each piece byte-identical to its
   camera-tested build, changes only in the pieces' regions (~5 s): `work/venv/bin/python tools/m8_combotest.py`
@@ -74,7 +80,9 @@ For Goal 2, read `docs/DNG_PLAN.md` — the agreed approach, tag list, constrain
 - `tools/ghidra/` — headless Ghidra scripts (M8Pre seed/options, M8Xrefs refs into ranges, M8Coverage).
   Ghidra 12.1.4 + Temurin JDK 21 unpacked in `work/ghidra/` (re-download if work/ is wiped). Run:
   `JAVA_HOME=work/ghidra/jdk-21.0.12.1+1/Contents/Home work/ghidra/ghidra_12.1.4_PUBLIC/support/analyzeHeadless work/ghidra/proj m8 -import work/split-2.014/PXA.bin -overwrite -loader BinaryLoader -loader-baseAddr 0x20000 -processor ARM:LE:32:v5t -scriptPath tools/ghidra -preScript M8Pre.java -postScript M8Xrefs.java name:lo:hi ...`
-- `tools/m8_wrapdng.py` — desktop prototype of the in-camera RAW→DNG wrap: `python3 tools/m8_wrapdng.py sampleraws/X.RAW`
+- `tools/m8_wrapdng.py` — desktop prototype of the in-camera RAW→DNG wrap: `python3 tools/m8_wrapdng.py sampleraws/X.RAW` [--meta]
+- `tools/m8_metacheck.py` — `--meta` camera files: DNG MakerNote / AsShotNeutral vs the JPG, job dump:
+  `python3 tools/m8_metacheck.py fromcameraimports/L*.RAW`
 - `fromcameraimports/` — staging area for files copied off the camera card (test shots of each build). Keep.
 - `luttests/` — camera JPGs of the tone-curve tests (stage 11). Keep.
 - `sampleraws/` — camera samples (RAW, JPG, lens-cap frames) and DNGs generated from them. Keep.
