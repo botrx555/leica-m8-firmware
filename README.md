@@ -18,6 +18,9 @@ Optional add-ons for either option (experimental):
   own curves stay the default.
 - **Exposure compensation on the rear dial** (`--dial-ev`): turn the dial in shooting mode instead
   of going through the SET menu. Combines with either of the above.
+- **White balance and Leica MakerNote in the DNG** (`--meta`, Option 2 only): Lightroom's "As Shot"
+  white balance matches the camera's JPG, and the file carries the JPG's Leica MakerNote. Combines
+  with all of the above.
 
 > **Status: tested on the author's camera; Option 2 also on a second M8.** Both patches and every add-on run on the
 > author's M8 with firmware 2.014, and Option 2 with and without `--dial-ev` was tested independently on another
@@ -130,6 +133,25 @@ alt="Exposure compensation screen at 0 EV and at -1 1/3 EV, with a scale from -3
 
 It combines with `--info` or `--profiles`. Tested on the author's camera with Option 2 + `--profiles`.
 
+### Add-on: White balance and Leica MakerNote (`--meta`, Option 2 only)
+
+Without it, Lightroom opens every Option 2 file at the same fixed daylight white balance. With
+`--meta`, each DNG also carries:
+
+- **the white balance the camera used for that shot** (DNG AsShotNeutral). Lightroom's "As Shot"
+  then matches the JPG, with Auto as well as with a preset such as Tungsten. If the camera ever has no
+  value ready, the file falls back to the daylight balance, so it always opens.
+- **the Leica MakerNote**, the same 18 entries as in the JPG: body serial, lens code, the light
+  meter's readings, and so on. The lens code is only set when the body identified the lens (a 6-bit
+  coded lens with lens detection on).
+
+The white balance comes from the image processor, which hands it out together with the review image.
+In JPG fine+RAW mode stock firmware asks for it only after saving the RAW. With `--meta` the camera
+asks before the RAW, the same order stock firmware already uses for DNG+JPG mode, and the JPG then
+reuses the answer. Tested on the author's camera with Option 2 + `--meta --profiles --dial-ev`:
+white balance and MakerNote equal the JPG's in every frame: auto, Tungsten preset, and a long
+exposure that also writes a `.BIA` dark frame (the dark frame is left as in Option 2).
+
 With Option 2, each JPG fine+RAW shot produces:
 
 - `L10xxxxx.JPG`: the camera's normal JPG, used by in-camera review.
@@ -221,26 +243,28 @@ python3 m8patch.py dng       ~/Downloads/m8-2_014.upd     # Option 2
 Add-ons, in any combination with either option:
 
 - `--info` (Camera stats) **or** `--profiles` (Camera stats plus the picture-profile picker);
-- `--dial-ev` (exposure compensation on the rear dial), alone or with one of the above.
+- `--dial-ev` (exposure compensation on the rear dial), alone or with one of the above;
+- `--meta` (white balance and Leica MakerNote in the DNG), Option 2 only, with any of the above.
 
-For example: `python3 m8patch.py dng ~/Downloads/m8-2_014.upd --profiles --dial-ev`.
+For example: `python3 m8patch.py dng ~/Downloads/m8-2_014.upd --meta --profiles --dial-ev`.
 
 The script:
 
 - only reads your stock file and never changes it;
 - refuses anything that isn't Leica's unmodified 2.014 file;
 - writes the result to `build/m8-2_014-raw-menu.upd` or `build/m8-2_014-dng.upd` (with add-ons:
-  `…-dng-info.upd`, `…-dng-profiles-dial.upd`, and so on). It never overwrites an existing file;
+  `…-dng-info.upd`, `…-dng-meta-profiles-dial.upd`, and so on). It never overwrites an existing file;
   `--out-dir DIR` writes somewhere else;
 - writes it only if it is byte-identical to one of the builds below, and prints its SHA-256, whether
   that exact file was tested on a camera, and the next steps.
 
 ### Builds
 
-Each build is made of pieces: the RAW patch (always), the DNG writer (Option 2), Camera stats or the
-profile picker, and the dial. **Every piece has been tested on a camera.** The pieces live in
-separate parts of the firmware and don't touch each other, so a combination contains each piece's
-code byte for byte as it was tested; `tools/m8_combotest.py` checks this for all 12 combinations,
+Each build is made of pieces: the RAW patch (always), the DNG writer (Option 2; with `--meta`, the
+DNG writer with white balance and MakerNote), Camera stats or the profile picker, and the dial.
+**Every piece has been tested on a camera.** The pieces live in separate parts of the firmware and
+don't touch each other, so a combination contains each piece's code byte for byte as it was tested;
+`tools/m8_combotest.py` checks this for all 18 combinations,
 and the emulator tests run every combination. Builds marked *exact* were also flashed as that exact
 file.
 
@@ -258,6 +282,12 @@ file.
 | Option 2 + `--dial-ev` | `31c1ac63b7aa332dcad0c430f3f575a3b8bf717327f156ad8ca135fb9ec2b074` | exact (second M8) |
 | Option 2 + `--info --dial-ev` | `02301208cf12d4807936c466ae8a14c3c2fbd42c1010750038f7e759bd58c4b5` | pieces |
 | Option 2 + `--profiles --dial-ev` | `1254b7430a492c9197f2c4bb812bdd9a11e7d3b6a97fb043f245274b4fa07dfa` | exact |
+| Option 2 + `--meta` | `9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04` | pieces |
+| Option 2 + `--meta --info` | `624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8` | pieces |
+| Option 2 + `--meta --profiles` | `a0161ed4991003134afd8a6dbcebbe2529dfddec3b3af02f46c2cc3c6e9c754f` | pieces |
+| Option 2 + `--meta --dial-ev` | `bd914f4db75ab311f852acae81088e8250fe6ed90a093c89567d96e20708122a` | pieces |
+| Option 2 + `--meta --info --dial-ev` | `4382b20c1e36e8c1b0fba0a4871e4391154b789f584f23785924690adc86bbe7` | pieces |
+| Option 2 + `--meta --profiles --dial-ev` | `4359b04b41dd81761730e79fde3b46a09044e908c55cdc56cd8d8add3288e905` | exact |
 
 "Second M8" / "two M8s": also flashed and tested by vcs222 on another camera (2026-11-04,
 [FINDINGS](docs/FINDINGS.md#hardware-results)). If you flash a *pieces* build, please report how it went
@@ -274,7 +304,8 @@ file.
 5. After the restart: SET → Compression → **JPG fine+RAW**. Take a test shot and check it on the
    computer. With `--info`, press INFO in shooting mode: Camera stats appears, INFO or SET closes it.
    With `--profiles`, see [Picture profiles](#picture-profiles-experimental). With `--dial-ev`, turn
-   the rear dial in shooting mode.
+   the rear dial in shooting mode. With `--meta`, open a test shot in Lightroom: White Balance "As
+   Shot" should look like the JPG.
 
 ## Safety and recovery
 
@@ -283,7 +314,10 @@ instructions: one in the settings loader, which runs at every start-up (it keeps
 instead of resetting it), and two in the SET-menu loader (they list it in Compression). Option 2
 adds the DNG code, `--info` / `--profiles` add the INFO screen (each reached through one changed
 branch), and `--dial-ev` adds the dial code (two changed branches in the key handler plus one entry of
-the screen's event table, for its 2-second close).
+the screen's event table, for its 2-second close). `--meta` replaces Option 2's DNG code with a
+version that also copies the white balance and MakerNote, plus one changed branch in the file-save
+routine: in JPG fine+RAW mode the RAW asks the image processor for the white balance first, as a DNG
+does in stock DNG+JPG mode.
 Everything else stays byte-identical: the bootloader (RedBoot, not in the update file at all), the
 SD-card updater, the rest of the startup code and of settings load/save, and every other part of
 the update file (DSP, FPGA, body controller, fonts, lens table). The patch scripts check this
@@ -323,12 +357,13 @@ camera to Leica for service, reflash stock.
   for developers), but on the camera, review of a JPG + `.DNG` pair then shows only the DNG's file
   name and can't reach the JPG, because these DNGs have no embedded preview. Keeping `.RAW` keeps
   in-camera review working normally.
-- **White balance:** Lightroom starts from a fixed daylight balance (Auto and the presets work
-  normally); the camera's WB setting isn't carried over yet.
+- **White balance:** without `--meta`, Lightroom starts from a fixed daylight balance (Auto and the
+  presets work normally). With `--meta` it starts from the camera's own value for the shot.
 - **Black level** follows the ISO (92 at ISO 160, doubling per step to 1472 at ISO 2500, the rule
   from Arvid Kuehl's m8raw2dng, confirmed on the author's camera). One value for all four colour
   channels; whether green needs a slightly higher value is still open.
-- **Not included yet:** lens name, body serial, the Leica MakerNote, and an embedded preview.
+- **Not included yet:** lens name and an embedded preview. Body serial and the Leica MakerNote come
+  with `--meta`.
 - **`.BIA` dark frames** (written for long exposures) also get the TIFF header bytes, but no DNG tags.
   Converters that skip the header, such as m8raw2dng2, aren't affected.
 - **Firmware 2.014 only.** Other versions haven't been tested, and the scripts refuse them.
@@ -357,6 +392,10 @@ analysis with Capstone and Ghidra, then checked in an emulator and on the camera
      `ldimg` debug command used to be; that command is now a stub that returns.
   3. The routine copies a 902-byte DNG tag block into the trailing row and fills the per-shot values
      from the shot's metadata, which the camera already holds for the JPG.
+  4. With `--meta`, the routine moves to the space of the unused `writejpgipp` debug command and the
+     tag block (1,192 bytes) adds the Leica MakerNote, laid out as the JPG's. The white balance is
+     copied only when it has the form the image processor gives it. One more branch in the file-save
+     routine makes the RAW ask for it before its data, as a DNG does.
 
   The pixels are never touched or copied, and the file size, timing and write path stay as in stock
   RAW mode.
@@ -412,12 +451,13 @@ at the end and prints little before that, so a long silence is normal.
 |---|---|---|
 | `m8_emutest.py` | Option 1: settings loader and SET menu | ~1 s |
 | `m8_savetest.py --build dng` | Option 2: one build through the save path | ~2.5 min |
-| `m8_savetest.py --quick` | all 12 builds + the diagnostic builds, fewer variants per sample | ~5 min |
-| `m8_savetest.py` | all 12 builds + the diagnostic builds, all variants | ~12 min |
+| `m8_savetest.py --quick` | all 18 builds + the diagnostic builds, fewer variants per sample | ~7 min |
+| `m8_savetest.py` | all 18 builds + the diagnostic builds, all variants | ~25 min |
 | `m8_infotest.py` | `--info` / `--profiles` builds: key handling, every key in every GUI state | ~10 s |
 | `m8_inforender.py` | `--info` / `--profiles` screens: rendered with the camera's drawing code (PNG) | ~2 s |
-| `m8_evtest.py` | `--dial-ev` builds: key handling in every GUI state, close timer, Leica's EV step, screen | ~40 s |
-| `m8_combotest.py` | all 12 `m8patch.py` builds: hashes, each piece byte-identical to its camera-tested build | ~5 s |
+| `m8_evtest.py` | `--dial-ev` builds: key handling in every GUI state, close timer, Leica's EV step, screen | ~1 min |
+| `m8_combotest.py` | all 18 `m8patch.py` builds: hashes, each piece byte-identical to its camera-tested build | ~8 s |
+| `m8_metacheck.py` | `--meta` camera files: DNG white balance and MakerNote vs the JPG (plain Python) | ~1 s |
 
 `m8_savetest.py` runs the real store routine, DMA handler, ring buffer and RAW writer. It models the
 DMA controller and the card-writer task. For each build it compares the file that reaches the "card"

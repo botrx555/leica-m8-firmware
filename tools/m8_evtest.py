@@ -198,15 +198,15 @@ def main():
               ('call', 'timer_stop', 'app+0x2534C', '0x0')]
     unknown = set()
     pxas = {}
-    for option, screen, dial in d.BUILDS:
+    for option, screen, dial, meta in [b + (False,) for b in d.BUILDS] + d.META_BUILDS:
         if not dial:
             continue
         region = SCREEN_REGION[screen]
-        n, base_n = d.build_name(option, screen, True), d.build_name(option, screen, False)
-        _, sn = d.build_file(stock, option, screen, True)
-        _, sb = d.build_file(stock, option, screen, False)
+        n, base_n = d.build_name(option, screen, True, meta), d.build_name(option, screen, False, meta)
+        _, sn = d.build_file(stock, option, screen, True, meta)
+        _, sb = d.build_file(stock, option, screen, False, meta)
         pn, pb = d.pxa_of(sn), d.pxa_of(sb)
-        pxas[option, screen] = pn
+        pxas[option, screen, meta] = pn
         pos, size = d.find_lump(sn, b'PXA')
         res.check(f'{n} vs {base_n}: changes only in setting + evkey + evheld + evtimer',
                   d.region_violations(sb, sn, pos, size, {'setting', 'evkey', 'evheld', 'evtimer'}), [])
@@ -239,7 +239,7 @@ def main():
                 res.check(f'{n}, {state}, `{chr(key)}`: as base, then step, open as INFO does, arm the timer',
                           (tn[:-1], tn[-1] == tb[-1]), (want, True))
 
-    pxa = pxas['dng', 'profiles']             # the camera-tested build (old stage 15)
+    pxa = pxas['dng', 'profiles', False]      # the camera-tested build (old stage 15)
     # ---- 2. keys while the page is open
     bad = []
     for key in range(256):

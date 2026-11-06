@@ -627,7 +627,11 @@ L1031919 (ISO 160, different scene). File-level evidence only; the firmware rout
   - WB preset covered: L1032099 was shot on the Tungsten preset (Lightroom ≈ 2,700 K, tint −9; the
     auto WB frames ≈ 4,900–5,000 K, tint +19…+32). MakerNote 0x300 is 1 in all five frames, so it is
     not the WB mode.
-  - Not covered yet: a .BIA (long exposure).
+  - Long exposure with a .BIA, camera-tested 2026-11-06. L1032100 (1/2 s, ISO 640, Tungsten):
+    - the .RAW's AsShotNeutral and 18/18 MakerNote tags == the JPG; 35 IFD0 tags; data normal
+      (99.9th percentile 16383, no fill rows, correlation with the JPG 0.90);
+    - the .BIA is a normal dark frame (mean 360, black 368 at ISO 640), with the TIFF header bytes
+      only and its trailing row untouched (hook and raw_fetch skip it).
 
 ## GUI: screen, fonts, keys, windows (static, 2026-10-23, research for an INFO screen)
 

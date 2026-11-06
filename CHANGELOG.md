@@ -3,7 +3,7 @@
 Versions of this project (not Leica firmware versions). Every build is for Leica M8 firmware **2.014**.
 Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't flash it.
 
-## Unreleased
+## v0.7.0 — 2026-11-06
 
 - `dng --dial-ev` (`31c1ac63…`) has now been flashed and tested as that exact file, and `dng`
   (`55264b11…`) tested again, on a second M8 by vcs222 (2026-11-04, PR #6). `m8patch.py` and the
@@ -14,15 +14,25 @@ Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't 
   `--stage N`, the old numbers of regular builds as aliases. `m8_savetest.py --build …` tests one
   build; by default it tests all 12 plus the diagnostic builds. Every build's bytes and hash are
   unchanged.
-- Developers, not offered by `m8patch.py` yet: `--meta` add-on for `dng`. Each DNG gets the
-  camera's per-shot white balance (AsShotNeutral, so Lightroom's "As Shot" matches the JPG, auto
-  or preset) and the Leica MakerNote (the JPG's 18 tags).
-  - In JPG fine+RAW the camera asks the Blackfin for the white balance only after the RAW. The new
-    `meta fetch` piece makes the RAW ask first, as a DNG does in DNG+JPG mode.
-  - `dng --meta --profiles --dial-ev` (`4359b04b…`) was camera-tested 2026-11-05.
-  - Not tested yet: a long exposure with a .BIA dark frame.
-  - New tools: `tools/asm/m8_dngmeta.s`, `tools/m8_metacheck.py` (checks camera files against
-    their JPGs), `m8_wrapdng.py --meta`.
+- **New add-on, `--meta`, for Option 2 (`dng`), with any other add-on:** each DNG also carries
+  the camera's per-shot white balance, so Lightroom's "As Shot" matches the JPG (auto or preset),
+  and the JPG's Leica MakerNote (body serial, lens code, meter readings). Before, every file opened
+  at the same daylight balance. In JPG fine+RAW mode the camera now asks the image processor for the
+  white balance before saving the RAW, the order stock firmware uses for DNG+JPG mode. 6 new
+  builds. `dng --meta --profiles --dial-ev` (`4359b04b…`) was camera-tested as that exact file on
+  2026-11-05/06: auto WB, Tungsten preset and a long exposure with a .BIA dark frame.
+- Developers: `tools/asm/m8_dngmeta.s`, `tools/m8_metacheck.py` (checks camera files against their
+  JPGs), `m8_wrapdng.py --meta`; combotest, evtest and savetest cover the `--meta` builds.
+- Builds without `--meta` are unchanged (same hashes as v0.6.0).
+
+| Build | SHA-256 | On a camera |
+|---|---|---|
+| 2 `dng --meta` | `9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04` | pieces |
+| 2 `dng --meta --info` | `624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8` | pieces |
+| 2 `dng --meta --profiles` | `a0161ed4991003134afd8a6dbcebbe2529dfddec3b3af02f46c2cc3c6e9c754f` | pieces |
+| 2 `dng --meta --dial-ev` | `bd914f4db75ab311f852acae81088e8250fe6ed90a093c89567d96e20708122a` | pieces |
+| 2 `dng --meta --info --dial-ev` | `4382b20c1e36e8c1b0fba0a4871e4391154b789f584f23785924690adc86bbe7` | pieces |
+| 2 `dng --meta --profiles --dial-ev` | `4359b04b41dd81761730e79fde3b46a09044e908c55cdc56cd8d8add3288e905` | exact file (2026-11-05) |
 
 ## v0.6.0 — 2026-11-02
 
