@@ -13,8 +13,8 @@ Tools for patching the firmware of the **Leica M8** so it:
 Optional add-ons:
 
 - **INFO shows Camera stats** (`--info`, experimental): shutter count, battery, temperature and lens code.
-- **Exposure compensation on the rear dial** (`--dial-ev`): turn the dial in shooting mode instead
-  of going through the SET menu.
+- **Exposure compensation and ISO on the rear dial** (`--dial-ev`): turn the dial in shooting mode
+  instead of going through the SET menu; UP/DOWN switch between the two.
 
 > **Status: tested on the author's camera; the DNG writer also on a second M8.** Every part runs on
 > the author's M8 with firmware 2.014, and the DNG writer with and without `--dial-ev` was tested
@@ -115,21 +115,25 @@ way that page does (a read-only request). Service mode is unchanged: after the s
 sequence, INFO still opens the service menu. The screen is in English only. Tested on the author's
 camera.
 
-### Add-on: Exposure compensation on the rear dial (`--dial-ev`)
+### Add-on: Exposure compensation and ISO on the rear dial (`--dial-ev`)
 
-On a stock M8, exposure compensation is only in the SET menu. With `--dial-ev`, turning the rear
-dial in shooting mode changes it by ⅓ EV per click (−3 to +3 EV) and shows the value on the screen:
+On a stock M8, exposure compensation and ISO are only in the SET menu. With `--dial-ev`, the first
+click of the rear dial in shooting mode opens the exposure compensation page; further clicks change
+it by ⅓ EV (−3 to +3 EV). UP or DOWN switches to the ISO page and back; there the dial moves
+through AUTO, 160, 320, 640, 1250 and 2500:
 
 <p align="center"><img src="docs/assets/dial-ev.png" width="640"
-alt="Exposure compensation screen at 0 EV and at -1 1/3 EV, with a scale from -3 to +3"></p>
+alt="Exposure compensation page at +1 EV with a scale from -3 to +3, and the ISO page with six cells, 1250 highlighted"></p>
 <p align="center"><sub>Rendered in the emulator with the camera's own drawing routines and fonts
 (<code>tools/m8_evtest.py</code>), 2× size.</sub></p>
 
-- The value changes with every click, straight away; it shows in amber when it isn't 0.
-- The screen closes 2 seconds after the last click, or at once with SET, INFO, any other button or
-  the shutter. The value stays set, also after power-off, exactly like a SET-menu change: it is the
-  same setting, changed by Leica's own (unused) dial routine found in the firmware, and the shot's
-  EXIF shows it.
+- The first click only opens the page, so a bumped dial changes nothing. On the page, every click
+  changes the value straight away; exposure compensation shows in amber when it isn't 0.
+- The page closes 2 seconds after the last key, or at once with SET, INFO, any other button or
+  the shutter. The values stay set, also after power-off, exactly like a SET-menu change: they are
+  the same settings. Exposure compensation is changed by Leica's own (unused) dial routine found in
+  the firmware; ISO the same way the SET menu changes it, and the viewfinder's shutter speed follows
+  at once (A mode). The shot's EXIF shows both.
 - Works in every shooting mode where the menu setting does. Service mode and Simple mode are
   unchanged (the dial does nothing there, as in stock).
 
@@ -186,12 +190,12 @@ Builds marked *exact* were also flashed as that exact file.
 |---|---|---|
 | the build | `9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04` | pieces |
 | + `--info` | `624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8` | pieces |
-| + `--dial-ev` | `bd914f4db75ab311f852acae81088e8250fe6ed90a093c89567d96e20708122a` | pieces |
-| + `--info --dial-ev` | `4382b20c1e36e8c1b0fba0a4871e4391154b789f584f23785924690adc86bbe7` | exact |
+| + `--dial-ev` | `c40539668a39a3dffaaf3d57a5f85d6e17630c4f25bdadae1b2f6e80e2d1762d` | pieces |
+| + `--info --dial-ev` | `796ecbc676cd184899126de2b8eb4ceb5eb0b32d4d4cb57ddcf9480f4499ab44` | exact |
 
 *Pieces*: each piece was flashed and tested on a camera inside an earlier build: the DNG writer
 with white balance in `4359b04b…` (2026-11-05/06), Camera stats in `32e6854e…` (2026-10-23), the
-dial in `1254b743…` (2026-11-02), see [CHANGELOG](CHANGELOG.md). If you flash one of these builds,
+dial (EV + ISO) in `796ecbc6…` (2026-11-06), see [CHANGELOG](CHANGELOG.md). If you flash one of these builds,
 please report how it went (add-ons, SHA-256) in an issue.
 
 Earlier versions offered more combinations (Option 1 without the DNG writer, the DNG writer without
@@ -209,7 +213,7 @@ file built with an earlier version can still be checked.
 5. After the restart: SET → Compression → **JPG fine+RAW**. Take a test shot and open its `.RAW` in
    Lightroom: White Balance "As Shot" should look like the JPG. With `--info`, press INFO in
    shooting mode: Camera stats appears, INFO or SET closes it. With `--dial-ev`, turn the rear dial
-   in shooting mode.
+   in shooting mode (first click opens the page), then UP/DOWN for ISO.
 
 ## Safety and recovery
 
@@ -228,9 +232,10 @@ automatically on every build (details: [docs/FINDINGS.md](docs/FINDINGS.md)). Th
 only while a JPG fine+RAW shot is being saved, never at startup or during an update. It writes only
 into the unused last sensor row of the image buffer, and it range-checks every write. The `--info`
 code runs only when INFO is pressed in shooting mode; it opens the screen the way the camera's own
-service menu does, draws with the camera's own drawing routines, and changes no settings. The `--dial-ev` code runs only when the dial is turned in shooting mode; it changes
-exposure compensation with the camera's own routine for it, which updates the setting the same way
-the SET menu does (and like the menu, the camera saves it at power-off), and shows it with the same
+service menu does, draws with the camera's own drawing routines, and changes no settings. The `--dial-ev` code runs only when the dial is turned in shooting mode (and for the
+keys while its page is open); it changes exposure compensation with the camera's own routine for it
+and ISO with the same three steps the SET menu uses, so both settings update the same way as from
+the menu (and like the menu, the camera saves them at power-off), and shows them with the same
 screen mechanism as `--info`.
 
 **Rolling back.** The updater accepts the same or an older version, so flashing the stock
@@ -266,9 +271,9 @@ camera to Leica for service, reflash stock.
 - **`--info`:** the screen is English only, and the temperature is the body's own reading, shown as
   °C. If the camera is switched off while Camera stats is open, the service page "Body Debug Data"
   shows Camera stats instead until the next restart (no effect outside service mode).
-- **`--dial-ev`:** the value shows on the rear screen only, not in the viewfinder (Leica's own,
+- **`--dial-ev`:** the values show on the rear screen only, not in the viewfinder (Leica's own,
   unfinished version of this feature would have used the viewfinder display, but the body controller
-  never enables it). A bumped dial changes the compensation; the screen lights up when that happens.
+  never enables it). The page always opens on exposure compensation.
 - **Three of the four builds** are made of camera-tested pieces but haven't been flashed as those
   exact files yet; `--info --dial-ev` has (see [Builds](#builds)).
 
@@ -323,12 +328,14 @@ analysis with Capstone and Ghidra, then checked in an emulator and on the camera
   mode, where stock ignores it) to new code in the space of two unused Blackfin-test debug commands.
   It opens the service menu's Body Debug Data dialog the way the service menu does, with its own
   drawing and key methods while open, and restores the dialog's methods on close.
-- **Dial EV (`--dial-ev`):** the rear dial sends two keys (`c`/`w`) that stock ignores in shooting mode.
-  The firmware already contains Leica's step routine for them (part of an unused "EV fast access"
-  window); two branches in the key handler send the dial keys to new code (in the space of the
-  unused `setting` debug command), which calls that routine and shows the value on the same borrowed
-  dialog as INFO. The dialog's own timer, re-aimed through one entry of the screen's event table,
-  closes it after 2 seconds.
+- **Dial EV + ISO (`--dial-ev`):** the rear dial sends two keys (`c`/`w`) that stock ignores in shooting
+  mode. The firmware already contains Leica's EV step routine for them (part of an unused "EV fast
+  access" window); two branches in the key handler send the dial keys to new code (in the space of
+  four adjacent unused debug commands, `bf_dmatest` to `setting`), which opens the same borrowed
+  dialog as INFO. While it is open, UP/DOWN swap its methods between the EV and ISO pages; the dial
+  calls Leica's EV step, or for ISO does what the SET menu does (working profile, store the value,
+  post "settings changed", which sends it to the body). The dialog's own timer, re-aimed through one
+  entry of the screen's event table, closes it after 2 seconds.
 
 Every address, offset and decision, with the evidence for it, is in
 [`docs/FINDINGS.md`](docs/FINDINGS.md). The design, staging and risk assessment are in
@@ -374,7 +381,7 @@ at the end and prints little before that, so a long silence is normal.
 | `m8_savetest.py` | the 4 builds + the diagnostic builds, all variants | ~10 min |
 | `m8_infotest.py` | INFO builds: key handling, every key in every GUI state | ~10 s |
 | `m8_inforender.py` | INFO screens: rendered with the camera's drawing code (PNG) | ~2 s |
-| `m8_evtest.py` | `--dial-ev` builds: key handling in every GUI state, close timer, Leica's EV step, screen | ~20 s |
+| `m8_evtest.py` | `--dial-ev` builds (EV, wake, EV + ISO): key handling in every GUI state, page keys, ISO step, close timer, Leica's EV step, screens | ~50 s |
 | `m8_combotest.py` | the 4 `m8patch.py` builds: hashes, each piece byte-identical to its camera-tested build | ~4 s |
 | `m8_metacheck.py` | camera files: DNG white balance and MakerNote vs the JPG (plain Python) | ~1 s |
 

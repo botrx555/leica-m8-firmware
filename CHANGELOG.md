@@ -3,6 +3,25 @@
 Versions of this project (not Leica firmware versions). Every build is for Leica M8 firmware **2.014**.
 Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't flash it.
 
+## v0.9.0 — 2026-11-06
+
+- **`--dial-ev` now does ISO too.** The first dial click only opens the exposure compensation page
+  (a bumped dial changes nothing); further clicks change it. UP/DOWN switch to an ISO page (AUTO,
+  160, 320, 640, 1250, 2500 in two rows) and back; the dial changes the page shown. ISO is changed
+  the way the SET menu changes it, and the viewfinder's shutter speed follows at once.
+- `--info --dial-ev` (`796ecbc6…`) was flashed and camera-tested as that exact file on 2026-11-06.
+  The two builds without `--dial-ev` are unchanged.
+- Developers: pieces `ev iso` (region `eviso` 0x2C038-0x2C9F4, four adjacent unused debug
+  commands) + hooks, `tools/asm/m8_infoeviso.s`; `m8_dngpatch … --dial-ev --iso`. The wake-only
+  version (`--dial-ev --wake`, `m8_infoev_wake.s`) and the v0.8.0 dial stay buildable.
+
+| Build | SHA-256 | On a camera |
+|---|---|---|
+| the build | `9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04` | pieces |
+| + `--info` | `624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8` | pieces |
+| + `--dial-ev` | `c40539668a39a3dffaaf3d57a5f85d6e17630c4f25bdadae1b2f6e80e2d1762d` | pieces |
+| + `--info --dial-ev` | `796ecbc676cd184899126de2b8eb4ceb5eb0b32d4d4cb57ddcf9480f4499ab44` | exact file (2026-11-06) |
+
 ## v0.8.0 — 2026-11-06
 
 - **Simpler: one build, two add-ons.** The persistent RAW menu, the in-camera 14-bit DNG and the

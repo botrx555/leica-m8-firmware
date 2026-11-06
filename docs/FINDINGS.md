@@ -1101,6 +1101,71 @@ owner's dial test (shutter dial A and M, half-press held, dial turned): nothing 
   a long half-press, SET / INFO / timer close, a shot with the page open, power-off with the page open,
   Simple mode (dial does nothing).
 
+### `--dial-ev --wake`: first click only opens the page (2026-11-06, built, not flashed)
+
+- Owner's request: one errant dial click should not change the exposure compensation. Piece
+  **`ev wake`** = `tools/asm/m8_infoev_wake.s` (sets `WAKE`, includes `m8_infoev.s`): in `ev_key` the
+  step call (`mov r1, r5` + `fcall 0x65954`, 0x2C4C8-0x2C4D0) becomes three `nop`s, so the first click
+  only opens the page and arms the 2 s timer; clicks while the page is open go to `on_key` and step
+  as before. Every label, the method table and the strings stay at the same addresses (the
+  assembler re-orders the literal pool: a few `ldr` offsets and pool words differ), so `ev key`,
+  `ev held`, `ev timer` are byte-identical to the camera-tested pieces. `EV_WAKE_CODE` `e137672b…`.
+- `m8_dngpatch.py ... dng --meta --info --dial-ev --wake` → `e95aafe7…`: differs from `4382b20c` only
+  in `setting` (32 bytes). m8_evtest 123/0 (wake: no step on the first click in the normal and
+  `a`-held states, everything else as the old version; page keys identical), combotest 43/0.
+- Offered builds stay on `ev` until `ev wake` is camera-tested.
+
+### ISO on the rear dial (static, 2026-11-06, research for an ISO page next to the EV page)
+
+- **Setting:** active profile **+0x20** (u16; profile = settings block [0xD4230] + 0x1C + 0x50 × index,
+  index = override [+2] unless 0xFFFF, else [+0], as for EV at +0x22). Values: **0xFFFF = AUTO ISO,
+  0 = 160, 1 = 320, 2 = 640, 3 = 1250, 4 = 2500** (from the stock `setting` command 0x2C7C0: "ISO:" row
+  = profile +0x20; Auto-ISO-Time +0x0A, Auto-ISO Max +0x0C). Menu texts: Leica's table 0xEF63C
+  {"AUTO ISO", "160", "320", "640", "1250", "2500", 0} (Max ISO list without AUTO at 0xEF698).
+- **SET menu commit** 0x4E4D4 (this, item): not in Simple mode (override != 5) → 0x219D4(settings, 4)
+  (working profile 4, as for every item); ISO item = this+0xE4, chosen index [item+0x44]: 0 → store
+  0xFFFF, n → store n − 1 into profile +0x20 (0x4E5B8); then **0x35208([0xD4220], [0xD421C])** = post
+  event **0x2715** (settings changed), then 0x4E46C(this, 0x500F) = GUI message 0x28A8 (EV item: +0x22,
+  0x2715, 0x5010). 0x28A8 → GUI app 0x423EC: closes/refreshes the open menu window (app+0x425C,
+  method +0x40) and redraws the main screen (0x40D20); not part of applying the setting (Leica's own
+  EV dial step 0x65954 posts only 0x2715, camera-tested in stage 15).
+- **Applying:** main-task handler of 0x2715 (0x3525C) sends every profile setting to the body with
+  0x3DE58(ctx, n, value): ISO = setting **1**, value −1 for AUTO else 0xA0 << index (160 … 2560
+  nominal), and stores the index at main+0x4400 (0 for AUTO). Same path as EV, so an ISO change made
+  as the menu makes it (profile 4, store +0x20, post 0x2715) reaches the exposure the same way.
+- **No Leica dial routine for ISO** (unlike `evfastaccess` 0x65954 for EV): our code would do the
+  menu's three steps itself: 0x219D4(settings, 4), strh profile+0x20, 0x35208(app, ctx).
+- **Space:** `setting` has 216 bytes free. `stress` (0x2C2F4–0x2C44C, 344 bytes, no references but its
+  registration) lies directly before it → 1,792 contiguous bytes; `bf_dmatest` 0x2C038 (488) free too.
+- **Design (owner, 2026-11-06):** two pages, EV and ISO; UP/DOWN (`u`/`d`) switch page while one is
+  open, the dial changes the shown page's value; first click only opens (`--wake`). Page = which
+  method table the dialog points at (vt_ev / vt_iso), so no new state memory. Needs the owner's OK to
+  widen the dial rules (CLAUDE.md) by: write profile +0x20, call 0x219D4 and 0x35208.
+
+### `--dial-ev --iso`: ISO page next to the EV page (2026-11-06, camera-tested)
+
+- `tools/asm/m8_infoeviso.s`, region **`eviso` 0x2C038-0x2C9F4** (2,492 bytes = debug commands
+  `bf_dmatest` 0x2C038, `mgs` 0x2C220 (212 bytes; m8_reclaim counts 4), `stress` 0x2C2F4, `setting`
+  0x2C44C; only references: their four registration words; stubs at all four entries); 2,292 bytes used.
+- Wake behaviour (first click opens the EV page). Page open: UP/DOWN (`u`/`d`) set dialog+0 to the other
+  method table (vt_ev / vt_iso), re-arm the 2 s timer, redraw; dial on the EV page = Leica's 0x65954; on
+  the ISO page = `iso_step`: position 0..5 (AUTO, 160 … 2500) from the active profile's +0x20, ±1
+  clamped, 0x219D4(settings, 4), store into the (new) active profile, 0x35208([0xD421C], [0xD4220]);
+  an unknown value is left alone. Any other key / the timer close as before (either table).
+- ISO page: two rows of three cells (92 × 64), current one amber with black text; "AUTO" is our text
+  (Leica's "AUTO ISO" is 105 px in font 4, wider than a cell), 160 … 2500 from Leica's table 0xEF63C.
+  Footer on both pages "Dial: adjust  UP/DN: EV/ISO  SET: ok" (298 px of 312).
+- `ev_key` / `ev_held` land on the same addresses as in `m8_infoev.s` (0x2C480 / 0x2C454), so the
+  `ev iso key` / `ev iso held` words equal the camera-tested ones; `ev iso timer` → 0x2C608.
+- `... dng --meta --info --dial-ev --iso` → `796ecbc6…`; differs from `4382b20c` only in eviso + evtimer.
+  m8_evtest 190/0 (key path in 12 states, both pages' keys, iso_step for every value / key incl.
+  unknown values, profile 7 and override 3, timer with either page, paint of AUTO / 160 / 1250 / 2500 /
+  bad / EV page, references), combotest 43/0, infotest 86/0, emutest 126/0. Save path unchanged.
+- **Camera test 2026-11-06 [tested]:** `796ecbc6…` flashed on the author's camera. Owner report: the
+  pages look as rendered; changing ISO on the page changes the shutter speed in the viewfinder at once
+  (A mode), as the SET menu does, so 0x2715 alone applies it (the menu's extra 0x28A8 is not needed).
+  Still to report: EXIF ISO of shots at a dial-set ISO / AUTO.
+
 ### Combining add-ons (v0.6.0, 2026-11-02)
 
 - **Owner's decision:** a build may ship when every piece in it is camera-tested, not only when the

@@ -44,6 +44,9 @@ from m8_rawpatch import PXA_BASE
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 SRC = os.path.join(ROOT, 'tools/asm/m8_infoev.s')
+ISO_SRC = os.path.join(ROOT, 'tools/asm/m8_infoeviso.s')
+SETPROF, CHANGED = 0x219D4, 0x35208
+P_CTX, P_APP = 0xD421C, 0xD4220
 LO, HI = d.REGIONS['setting']
 # every build with --dial-ev vs the same build without it; the screen code region the key handler runs
 SCREEN_REGION = {None: 'memtest12', 'info': 'memtest12', 'profiles': 'bfmem'}
@@ -72,16 +75,19 @@ STATES = {
 OPEN_STATES = ('normal', 'a held')
 
 
-def settings_block(emu, idx=4, override=0xFFFF, ev=9):
+def settings_block(emu, idx=4, override=0xFFFF, ev=9, iso=None):
     emu.w32(0xD4230, SETTINGS)
     emu.w16(SETTINGS, idx)
     emu.w16(SETTINGS + 2, override)
     for p in range(6):
         emu.w16(SETTINGS + 0x1C + 0x50 * p + 0x22, ev)
+        if iso is not None:
+            emu.w16(SETTINGS + 0x1C + 0x50 * p + 0x20, iso[p] if isinstance(iso, list) else iso)
 
 
-def run_key(pxa, region, state, key, unknown):
+def run_key(pxa, region, state, key, unknown, lohi=None):
     """Application key handler with the INFO code and ev_key real; -> trace."""
+    lohi = lohi or (LO, HI)
     trace = []
     def rec(name):
         def fn(emu, r0, r1, r2):
@@ -98,7 +104,7 @@ def run_key(pxa, region, state, key, unknown):
     stubs[EV_STEP] = rec('ev_step')
     stubs[ARM] = rec('arm')
     stubs[0x658B4] = rec('evfast_show')            # Leica's own dial window (0x45040 path)
-    real = [(it.KEY_HANDLER, 0x450AC), (0x403F0, 0x40410), d.REGIONS[region], (LO, HI)]
+    real = [(it.KEY_HANDLER, 0x450AC), (0x403F0, 0x40410), d.REGIONS[region], lohi]
     e = Emu(pxa, real=real, stubs=stubs, ram=0x200000)
     uc = e.uc
     uc.mem_map(APP, it.APP_SIZE)
@@ -183,12 +189,16 @@ def main():
     res = Results(verbose)
     stock = open(os.path.join(ROOT, 'firmware/stock/m8-2_014.upd'), 'rb').read()
     res.check('m8_infoev.s reassembles to EV_CODE', m8_asm.assemble(SRC) == d.EV_CODE, True)
+    wake_src = os.path.join(ROOT, 'tools/asm/m8_infoev_wake.s')
+    res.check('m8_infoev_wake.s reassembles to EV_WAKE_CODE', m8_asm.assemble(wake_src) == d.EV_WAKE_CODE, True)
     ir.SRC, ir.LO, ir.HI = SRC, LO, HI
     sym = ir.symbols()
     vt_ev = LO + sym['vt_ev']
     res.check('entry addresses in the patch script match the source',
               (d.EV_KEY_ENTRY, d.EV_TIMER_ENTRY), (LO + sym['ev_key'], LO + sym['ev_timer']))
     vt_words = list(struct.unpack('<22I', d.EV_CODE[sym['vt_ev']:sym['vt_ev'] + 88]))
+    res.check('wake: same size; method table, strings and the code after ev_key\'s pool identical',
+              (len(d.EV_WAKE_CODE), d.EV_WAKE_CODE[sym['vt_ev']:] == d.EV_CODE[sym['vt_ev']:]), (len(d.EV_CODE), True))
     p4 = d.pxa_of(d.build_file(stock, 'dng')[1])
     leica_vt = list(struct.unpack_from('<22I', p4, DLG_VT - PXA_BASE))
     res.check('vt_ev = the dialog\'s own table except keys / title / content',
@@ -198,25 +208,37 @@ def main():
               ('call', 'timer_stop', 'app+0x2534C', '0x0')]
     unknown = set()
     pxas = {}
-    for option, screen, dial, meta in d.BUILDS:
-        if not dial:
-            continue
+    ISO_LO, ISO_HI = d.REGIONS['eviso']
+    ir.SRC = ISO_SRC
+    iso_sym = ir.symbols()
+    ir.SRC = SRC
+    variant = {True: ((LO, HI), 'setting', vt_ev, d.EV_TIMER_ENTRY),
+               'wake': ((LO, HI), 'setting', vt_ev, d.EV_TIMER_ENTRY),
+               'iso': ((ISO_LO, ISO_HI), 'eviso', ISO_LO + iso_sym['vt_ev'], d.EV_ISO_TIMER_ENTRY)}
+    for option, screen, dial0, meta in d.BUILDS:
+      if not dial0:
+          continue
+      for dial in (True, 'wake', 'iso'):
+        lohi, vreg, vt_open, timer_entry = variant[dial]
         region = SCREEN_REGION[screen]
-        n, base_n = d.build_name(option, screen, True, meta), d.build_name(option, screen, False, meta)
-        _, sn = d.build_file(stock, option, screen, True, meta)
+        n, base_n = d.build_name(option, screen, dial, meta), d.build_name(option, screen, False, meta)
+        _, sn = d.build_file(stock, option, screen, dial, meta)
         _, sb = d.build_file(stock, option, screen, False, meta)
         pn, pb = d.pxa_of(sn), d.pxa_of(sb)
-        pxas[option, screen, meta] = pn
+        pxas[option, screen, dial] = pn
         pos, size = d.find_lump(sn, b'PXA')
-        res.check(f'{n} vs {base_n}: changes only in setting + evkey + evheld + evtimer',
-                  d.region_violations(sb, sn, pos, size, {'setting', 'evkey', 'evheld', 'evtimer'}), [])
-        res.check(f'{n}: references into the new code', it.refs_into(pn, LO, HI),
-                  ['word 0x2DF2C = 0x2C44C', 'branch 0x44E9C', 'branch 0x44EDC',
-                   f'word 0xEF2B4 = 0x{d.EV_TIMER_ENTRY:X}'])
+        res.check(f'{n} vs {base_n}: changes only in {vreg} + evkey + evheld + evtimer',
+                  d.region_violations(sb, sn, pos, size, {vreg, 'evkey', 'evheld', 'evtimer'}), [])
+        refs = it.refs_into(pn, *lohi)
+        res.check(f'{n}: references into the new code = the debug-shell registrations (entries) + the 3 hooks',
+                  ([r.split(' = ')[1] for r in refs if r.startswith('word 0x2D')],
+                   [r for r in refs if not r.startswith('word 0x2D')]),
+                  (['0x2C038', '0x2C220', '0x2C2F4', '0x2C44C'] if dial == 'iso' else ['0x2C44C'],
+                   ['branch 0x44E9C', 'branch 0x44EDC', f'word 0xEF2B4 = 0x{timer_entry:X}']))
         for state in STATES:
             diffs = []
             for key in range(256):
-                tb, tn = run_key(pb, region, state, key, unknown), run_key(pn, region, state, key, unknown)
+                tb, tn = run_key(pb, region, state, key, unknown), run_key(pn, region, state, key, unknown, lohi)
                 if tb != tn:
                     diffs.append((key, tb, tn))
             if state not in OPEN_STATES:
@@ -227,32 +249,34 @@ def main():
             for key, tb, tn in diffs:
                 k = len(tb) - 1                         # the base build's trace, without its return
                 step = tn[k] if len(tn) > k and tn[k][:2] == ('call', 'ev_step') else None
-                want = tb[:-1] + [('call', 'ev_step', step[2] if step else '?', '0x%X' % key),
+                want = tb[:-1] + ([] if dial in ('wake', 'iso') else [('call', 'ev_step', step[2] if step else '?', '0x%X' % key)]) + [
                                   ('call', 'show_page', 'app+0x6F6C', '0x1'),
                                   ('write', 'app+0x2548F', 1, 1),
                                   ('write', 'app+0x7005', 1, 0),
-                                  ('write', 'app+0x70A4', 4, vt_ev),
+                                  ('write', 'app+0x70A4', 4, vt_open),
                                   ('call', 'show', 'app+0x70A4', '0x1'),
                                   ('call', 'arm', 'app+0x7104', 0x271E, 2000, 1, 0, 0, 0)]
                 res.check(f'{n}, {state}, `{chr(key)}`: base build makes no call or write for it',
                           [x for x in tb[:-1] if x[0] == 'write' or x[1] not in ('dance_tracker', 'f_41788', 'timer_stop')], [])
-                res.check(f'{n}, {state}, `{chr(key)}`: as base, then step, open as INFO does, arm the timer',
+                res.check(f'{n}, {state}, `{chr(key)}`: as base, then ' + ('no step (wake), ' if dial in ('wake', 'iso') else 'step, ')
+                          + 'open as INFO does, arm the timer',
                           (tn[:-1], tn[-1] == tb[-1]), (want, True))
 
     pxa = pxas['dng', 'info', True]           # dng --meta --info --dial-ev (ev piece as camera-tested in 1254b743)
-    # ---- 2. keys while the page is open
-    bad = []
-    for key in range(256):
-        e, log = method_env(pxa, vt_ev)
-        e.call(LO + sym['on_key'], DIALOG, key)
-        if key in (ord('c'), ord('w')):
-            want = [('ev_step', DIALOG, key), ('arm', DIALOG + 0x60, 0x271E, 2000, 1, 0, 0, 0),
-                    ('redraw', DIALOG, ord('u'))]
-        else:
-            want = [('write', DIALOG, DLG_VT), ('dialog_key', DIALOG, ord('s'))]
-        if log != want:
-            bad.append((key, log))
-    res.check('page open: dial steps + re-arms + redraws; every other key closes (own table, SET path)', bad, [])
+    # ---- 2. keys while the page is open (both versions)
+    for label, px in (('', pxa), ('wake: ', pxas['dng', 'info', 'wake'])):
+        bad = []
+        for key in range(256):
+            e, log = method_env(px, vt_ev)
+            e.call(LO + sym['on_key'], DIALOG, key)
+            if key in (ord('c'), ord('w')):
+                want = [('ev_step', DIALOG, key), ('arm', DIALOG + 0x60, 0x271E, 2000, 1, 0, 0, 0),
+                        ('redraw', DIALOG, ord('u'))]
+            else:
+                want = [('write', DIALOG, DLG_VT), ('dialog_key', DIALOG, ord('s'))]
+            if log != want:
+                bad.append((key, log))
+        res.check(label + 'page open: dial steps + re-arms + redraws; every other key closes (own table, SET path)', bad, [])
 
     # ---- 3. timer event
     def timer(vt, hidden=False):
@@ -300,6 +324,113 @@ def main():
         mid = fb[70 * 960:105 * 960]                            # value text rows
         res.check(f'paint {label}: value drawn', any(mid), not label.startswith('bad'))
         s.png(os.path.join(out, f'ev-{label}.png'))
+    # ---- 6. --dial-ev --iso: page keys, ISO step (real), timer, paint
+    pxi = pxas['dng', 'info', 'iso']
+    vi_ev, vi_iso = ISO_LO + iso_sym['vt_ev'], ISO_LO + iso_sym['vt_iso']
+    res.check('iso: vt_ev / vt_iso = the dialog\'s own table except keys / title / content',
+              [[i for i in range(22) if struct.unpack_from('<22I', d.EV_ISO_CODE, iso_sym[t])[i] != leica_vt[i]]
+               for t in ('vt_ev', 'vt_iso')], [[11, 18, 19], [11, 18, 19]])
+    res.check('iso: four debug entries are stubs returning 0 (mov r0, #0; bx lr)',
+              [d.EV_ISO_CODE[iso_sym[k]:iso_sym[k] + 8].hex() for k in ('start', 'stub_mgs', 'stub_stress', 'stub')]
+              + [ISO_LO + iso_sym[k] for k in ('start', 'stub_mgs', 'stub_stress', 'stub')],
+              ['0000a0e31eff2fe1'] * 4 + [0x2C038, 0x2C220, 0x2C2F4, 0x2C44C])
+    CTXV, APPV = 0x1A0000, 0x1A4000
+
+    def iso_env(vt, idx=4, override=0xFFFF, iso=2, hidden=False):
+        log = []
+        def rec(name):
+            def fn(emu, r0, r1, r2):
+                if name == 'arm':
+                    sp = emu.uc.reg_read(UC_ARM_REG_SP)
+                    log.append(('arm', r0, r1, r2, emu.uc.reg_read(UC_ARM_REG_R3),
+                                emu.u32(sp), emu.u32(sp + 4), emu.u32(sp + 8)))
+                else:
+                    log.append((name, r0, r1))
+                return 0
+            fn.__name__ = name
+            return fn
+        stubs = {EV_STEP: rec('ev_step'), ARM: rec('arm'), DLG_KEY: rec('dialog_key'),
+                 LEICA_TIMER: rec('leica_timer'), REDRAW: rec('redraw'), CHANGED: rec('changed')}
+        e = Emu(pxi, real=[(ISO_LO, ISO_HI), (SETPROF, SETPROF + 8)], stubs=stubs, ram=0x200000)
+        e.uc.mem_map(APP, it.APP_SIZE)
+        e.w32(DIALOG, vt)
+        e.w32(DIALOG + 0x20, 4 if hidden else 0)
+        settings_block(e, idx=idx, override=override, iso=iso)
+        e.w32(P_CTX, CTXV)
+        e.w32(P_APP, APPV)
+        def on_write(uc_, access, addr, size, value, _):
+            if not STACK <= addr < STACK + 0x10000:
+                log.append(('write', addr, value & ((1 << 8 * size) - 1)))
+        e.uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
+        return e, log
+
+    prof = lambda i: SETTINGS + 0x1C + 0x50 * i
+    arm_w = ('arm', DIALOG + 0x60, 0x271E, 2000, 1, 0, 0, 0)
+    for page, vt, other in (('EV', vi_ev, vi_iso), ('ISO', vi_iso, vi_ev)):
+        bad = []
+        for key in range(256):
+            e, log = iso_env(vt)                    # profile 4, ISO 640 (value 2)
+            e.call(ISO_LO + iso_sym['on_key'], DIALOG, key)
+            if key in (ord('u'), ord('d')):
+                want = [('write', DIALOG, other), arm_w, ('redraw', DIALOG, ord('u'))]
+            elif key in (ord('c'), ord('w')) and page == 'EV':
+                want = [('ev_step', DIALOG, key), arm_w, ('redraw', DIALOG, ord('u'))]
+            elif key in (ord('c'), ord('w')):
+                want = [('write', SETTINGS, 4), ('write', prof(4) + 0x20, 3 if key == ord('w') else 1),
+                        ('changed', CTXV, APPV), arm_w, ('redraw', DIALOG, ord('u'))]
+            else:
+                want = [('write', DIALOG, DLG_VT), ('dialog_key', DIALOG, ord('s'))]
+            if log != want:
+                bad.append((chr(key), log, want))
+        res.check(f'iso, {page} page open: UP/DOWN -> other page, dial changes this page, other keys close',
+                  bad[:3], [])
+    # ISO step for every start value, both keys; read from the active profile, stored in profile 4
+    order = [0xFFFF, 0, 1, 2, 3, 4]
+    got, want = [], []
+    for start in order + [5, 0x1234]:
+        for key in ('w', 'c'):
+            e, log = iso_env(vi_iso, idx=1, iso=[9, start, 9, 9, 2, 9])   # active = user profile 1
+            e.call(ISO_LO + iso_sym['iso_step'], ord(key))
+            got.append((e.u16(SETTINGS), e.u16(prof(4) + 0x20), [x for x in log if x[0] != 'write']))
+            if start in order:
+                pos = order.index(start)
+                pos = min(5, pos + 1) if key == 'w' else max(0, pos - 1)
+                want.append((4, order[pos], [('changed', CTXV, APPV)]))
+            else:
+                want.append((1, 2, []))                                  # unknown value: untouched
+    res.check('iso step: AUTO<->160..2500 clamped, from the active profile into working profile 4, 0x2715 posted',
+              got, want)
+    e, log = iso_env(vi_iso, idx=7, iso=2)
+    e.call(ISO_LO + iso_sym['iso_step'], ord('w'))
+    res.check('iso step: no such profile -> nothing written or called', log, [])
+    e, log = iso_env(vi_iso, override=3, iso=[9, 9, 9, 1, 9, 9])
+    e.call(ISO_LO + iso_sym['iso_step'], ord('w'))
+    res.check('iso step with override profile 3 (not Simple): reads and writes profile 3, index [0] = 4 (as 0x65954)',
+              (e.u16(SETTINGS), e.u16(prof(3) + 0x20)), (4, 2))
+    for label, vt, hidden, wantlog in (
+            ('ISO page open: closed as by SET', vi_iso, False, [('write', DIALOG, DLG_VT), ('dialog_key', DIALOG, ord('s'))]),
+            ('ISO page hidden: only the method table', vi_iso, True, [('write', DIALOG, DLG_VT)]),
+            ('EV page open: closed as by SET', vi_ev, False, [('write', DIALOG, DLG_VT), ('dialog_key', DIALOG, ord('s'))]),
+            ('Leica\'s table: Leica\'s handler', DLG_VT, False, [('leica_timer', APP, 0x271E)])):
+        e, log = iso_env(vt, hidden=hidden)
+        e.call(ISO_LO + iso_sym['ev_timer'], APP, 0x271E)
+        res.check(f'iso timer, {label}', log, wantlog)
+    old = ir.SRC, ir.LO, ir.HI
+    ir.SRC, ir.LO, ir.HI = ISO_SRC, ISO_LO, ISO_HI
+    for label, vt, iso in [('iso-auto', vi_iso, 0xFFFF), ('iso-160', vi_iso, 0), ('iso-1250', vi_iso, 3),
+                           ('iso-2500', vi_iso, 4), ('iso-bad', vi_iso, 9), ('iso-evpage', vi_ev, 2)]:
+        s = ir.Screen(pxi, gui, None)
+        settings_block(s.e, iso=iso, ev=12)
+        s.e.w32(ir.DLG, vt)
+        try:
+            s.call(0x605AC, ir.DLG)
+            err = None
+        except Escape as x:
+            err = str(x)
+        res.check(f'paint {label}: runs to the end', err, None)
+        res.check(f'paint {label}: our stores only framebuffer / stack', s.bad_writes[:5], [])
+        s.png(os.path.join(out, f'ev-{label}.png'))
+    ir.SRC, ir.LO, ir.HI = old
     res.check('no escapes to unlisted firmware code', sorted(unknown), [])
     print(f'{res.ok} passed, {res.bad} failed; PNGs in {out}')
     sys.exit(1 if res.bad else 0)

@@ -9,7 +9,7 @@ Each build is made through m8patch.build() -- the path a user runs -- and must:
   - differ from Option 1 (the RAW patch, camera-tested) only inside the regions of its pieces;
   - carry each piece byte-identical to the camera-tested build that introduced it
     (m8_dngpatch.TESTED_PIECES: dng 55264b11, info 32e6854e, profiles d7a17ef2, dial 1254b743,
-    meta 4359b04b);
+    dial iso 796ecbc6, meta 4359b04b);
   - keep the pieces' regions disjoint (info and profiles share infokey and overlap: never together).
 Behaviour of the combined code is tested by m8_infotest / m8_inforender / m8_evtest / m8_savetest.
 
@@ -57,7 +57,7 @@ def main():
         res.check(f'{name}: == m8_dngpatch.build_file', out == d.build_file(stock, option, screen, dial, meta)[1],
                   True)
         pieces = (['meta'] if meta else ['dng'] if option == 'dng' else []) + ([screen] if screen else []) + \
-            (['dial'] if dial else [])
+            (['dial iso'] if dial == 'iso' else ['dial'] if dial else [])
         regions = [r for p in pieces for r in PIECES[p]]
         res.check(f'{name}: pieces\' regions disjoint', len(regions), len(set(regions)))
         spans = [d.REGIONS[r] for r in regions]

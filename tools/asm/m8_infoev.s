@@ -12,6 +12,7 @@
 @          (app+0x2548D) and not when the body has enabled Leica's own dial window (app+0x25744
 @          bit 0, 0x45040); then as ev_key.
 @ ev_key   from the application key handler's switch default (0x44EDC `b 0x44F8C` -> `b ev_key`),
+@          (WAKE version, m8_infoev_wake.s: no step here, the click only opens the page)
 @          r4 = GUI application, r5 = key: only `c` / `w` (dial) outside service mode, with
 @          app+0x254B0 == 0 (as the INFO case) and not in Simple mode (override profile 5); step, then open BodyDebugDataDialog the camera's own
 @          way (as stage 8's info_open) pointed at vt_ev, then arm its timer (0x8BD10, event 0x271E,
@@ -28,6 +29,10 @@
 @ Writes: the two flag bytes of stage 6, dialog+0 (method table), the dialog's timer (by 0x8BD10),
 @ the exposure-compensation setting and the working-profile index (by Leica's 0x65954, as the SET
 @ menu), the screen, our stack. No flash, EEPROM or card writes; no body commands.
+
+    .ifndef WAKE
+    .set    WAKE, 0                 @ 1 = m8_infoev_wake.s (first click wakes the page, no step)
+    .endif
 
     .syntax unified
     .arm
@@ -113,8 +118,14 @@ ev_key:                             @ r4 = GUI application, r5 = key
     ldrh    r0, [r0, #2]
     cmp     r0, #5
     beq     9f                      @ Simple mode (override profile 5): stock
+.if WAKE
+    nop                             @ m8_infoev_wake.s: the first click only opens the page;
+    nop                             @ later clicks (page open) go to on_key and step. Three nops
+    nop                             @ keep every label where the camera-tested version has it
+.else
     mov     r1, r5
     fcall   EV_STEP
+.endif
     add     r0, r4, #(MENU & 0xFF00)
     add     r0, r0, #(MENU & 0x00FF)
     mov     r1, #1
