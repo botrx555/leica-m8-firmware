@@ -1114,6 +1114,49 @@ owner's dial test (shutter dial A and M, half-press held, dial turned): nothing 
   reference build; m8patch's "exact"/"pieces" status matches the record. Behaviour of the combined
   code: m8_evtest (stages 15–20, 164/0), m8_infotest, m8_inforender, m8_savetest (every stage).
 
+## Lens detection and lens corrections (static, 2026-11-06, research only)
+
+Menu "Lens Detection": Off / Auto / Auto + UV/IR (strings 0xDFA08, 0xDF7C0). The camera can't see
+a filter: "+ UV/IR" means the owner says one is fitted.
+
+- **Lens table in PXA** 0xD7D90 (file 0xB7D90), 0x48-byte entries up to 0xD8FD8: +0x00 code × 4
+  (6-bit mount code), +0x04 focal length (mm, 0 = zoom/Tri-Elmar), +0x18 frame-line pair
+  (1 = 28/90, 2 = 35/135, 3 = 50/75, 4 = Tri-Elmar), +0x1D name ("2.8/21; 11134", "Noctilux 0,95/50;
+  11602", …). Entry 0 = "Uncoded". 39 lenses.
+- **LUTS `OBJ` (11,716 bytes, LUT 4, sent to the Blackfin like GAMMA; the Blackfin applies it).**
+  Header: u32 3, offsets 0x3C/0x13C/0x29C/0x3FC/0x41C/0x43C/0x187C/0x2CBC/0x2D40, then 32, 11, 48, 48, 27.
+  - 0x3C, 256 bytes: lens byte (code × 4 + frame-line bits from the mount) → lens index 0..32.
+    Lenses sharing a design share an index (e.g. the three 24 mm → 4). The Super-Elmar 21 Asph
+    (byte 205) maps to 32, one past the 32-entry tables below (reads the next table's bytes; effect not traced).
+  - 0x13C and 0x29C, 352 bytes each = 32 lenses × 11 aperture steps → set number 1..48, one map
+    per table (F, G below). Wide angles and the 135 use one set at every aperture; 35–90 mm lenses
+    switch to a weaker set after 1–5 steps (more fall-off wide open), so **the correction depends on
+    aperture** — the camera's estimated aperture (front light sensor vs TTL), not a real coupling.
+  - 0x3FC and 0x41C, 32 bytes each: model type per lens for table F / G (1 = elliptical Gaussian
+    record `a, -cx, b, -cy, level, 0`; 3 = radial polynomial `cx, cy, level, c2, c4, c6` in r²,
+    trailer `1, 0.1, 1`). Formula readings are my fit of the numbers, not traced in Blackfin code.
+  - **Table F** 0x43C and **table G** 0x187C: 48 sets × 27 float32 = 4 records (one per Bayer
+    channel R, G, G, B; "level" looks like the calibration flat's centre value) + 3-float trailer.
+  - 0x2CBC / 0x2D40: 33 u32 each, identical (u16 pairs 0,256,512 … + 16384), purpose unknown.
+- **F = Auto (no filter), G = Auto + UV/IR**, from the numbers: corner brightness vs centre,
+  R / G / B (R/G < 1 = red drops more in the corner = cyan corner, which a correction removes):
+
+  | Lens | F (Auto) | R/G | G (UV/IR) | R/G |
+  |---|---|---|---|---|
+  | Elmarit 2.8/21 | 0.64 / 0.68 / 0.70 | 0.94 | 0.37 / 0.49 / 0.52 | 0.75 |
+  | 24 mm (3 lenses) | 0.64 / 0.65 / 0.68 | 0.99 | 0.44 / 0.52 / 0.54 | 0.86 |
+  | Elmarit 2.8/28 | 0.70 / 0.71 / 0.74 | 0.98 | 0.49 / 0.58 / 0.62 | 0.85 |
+  | Summicron 2/35 v4 | 0.70 / 0.71 / 0.74 | 0.99 | 0.56 / 0.63 / 0.66 | 0.89 |
+  | Summicron 2/50, wide open | 0.72 / 0.72 / 0.76 | 1.00 | same set data | 1.00 |
+  | Summicron 2/90, wide open | 0.84 / 0.82 / 0.85 | 1.03 | 0.85 / 0.84 / 0.89 | 1.01 |
+
+  From the 35 Asph on, G holds the same numbers as F (shifted by one set), i.e. the filter
+  correction is only for wide angles, where light hits the filter at a steep angle. The 135
+  (and index 29–31) values look odd (strong fall-off for a tele); not checked.
+- **Open:** whether the Blackfin applies OBJ to the RAW data we wrap as DNG or only to the JPG
+  (and Leica's 8-bit DNG). Test: plain evenly lit wall, coded 21/24/28, same exposure at Lens
+  Detection Off and Auto + UV/IR; compare the corner R/G of the two `.RAW` files.
+
 ## Known 2.024 issue
 
 Some bodies stop saving images after 2.024 (LED blinks, nothing written). Fixed for some
