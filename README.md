@@ -128,7 +128,7 @@ alt="Exposure compensation page at +1 EV with a scale from -3 to +3, and the ISO
 (<code>tools/m8_evtest.py</code>), 2× size.</sub></p>
 
 - The first click only opens the page, so a bumped dial changes nothing. On the page, every click
-  changes the value straight away; exposure compensation shows in amber when it isn't 0.
+  changes the value straight away; exposure compensation shows in red when it isn't 0.
 - The page closes 2 seconds after the last key, or at once with SET, INFO, any other button or
   the shutter. The values stay set, also after power-off, exactly like a SET-menu change: they are
   the same settings. Exposure compensation is changed by Leica's own (unused) dial routine found in
@@ -190,12 +190,14 @@ Builds marked *exact* were also flashed as that exact file.
 |---|---|---|
 | the build | `9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04` | pieces |
 | + `--info` | `624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8` | pieces |
-| + `--dial-ev` | `c40539668a39a3dffaaf3d57a5f85d6e17630c4f25bdadae1b2f6e80e2d1762d` | pieces |
-| + `--info --dial-ev` | `796ecbc676cd184899126de2b8eb4ceb5eb0b32d4d4cb57ddcf9480f4499ab44` | exact |
+| + `--dial-ev` | `89fbcc00674f69524b9460fa0e47659c4ff5f422767d3f9d1f4dff3436368f21` | pieces, red not flashed |
+| + `--info --dial-ev` | `4cefacf137a8013c69d0400a1393d3667f369fdfa4e601ecb38dd3a55286376b` | pieces, red not flashed |
 
 *Pieces*: each piece was flashed and tested on a camera inside an earlier build: the DNG writer
 with white balance in `4359b04b…` (2026-11-05/06), Camera stats in `32e6854e…` (2026-10-23), the
-dial (EV + ISO) in `796ecbc6…` (2026-11-06), see [CHANGELOG](CHANGELOG.md). If you flash one of these builds,
+dial (EV + ISO) in `796ecbc6…` (2026-11-06), see [CHANGELOG](CHANGELOG.md). *Red not flashed*: since
+v0.10.0 the dial pages use Leica red instead of amber; that colour change (four words, nothing else)
+hasn't been flashed on its own yet. The author's camera runs the amber version (`796ecbc6…`). If you flash one of these builds,
 please report how it went (add-ons, SHA-256) in an issue.
 
 Earlier versions offered more combinations (Option 1 without the DNG writer, the DNG writer without
@@ -274,8 +276,9 @@ camera to Leica for service, reflash stock.
 - **`--dial-ev`:** the values show on the rear screen only, not in the viewfinder (Leica's own,
   unfinished version of this feature would have used the viewfinder display, but the body controller
   never enables it). The page always opens on exposure compensation.
-- **Three of the four builds** are made of camera-tested pieces but haven't been flashed as those
-  exact files yet; `--info --dial-ev` has (see [Builds](#builds)).
+- **None of the four v0.10.0 builds has been flashed as that exact file.** All are made of
+  camera-tested pieces; the `--dial-ev` builds differ from the flashed `796ecbc6…` (v0.9.0) only in
+  the dial pages' colour (see [Builds](#builds)).
 
 ## Work in progress: picture profiles
 

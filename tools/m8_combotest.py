@@ -47,6 +47,8 @@ def main():
         res.check(f'reference for {p}: {sha[:8]} is a camera-tested build ({date})', 'flashed and camera-tested'
                   in d.KNOWN_OUTPUTS.get(sha, ''), True)
         res.check(f'reference for {p}: contains the piece', set(names) <= set(d.build_pieces(*known[sha])), True)
+    for p, (names, base_p, allowed, why) in d.WAIVED_PIECES.items():
+        PIECES[p] = sorted(d.regions_of(names))
     res.check('4 builds, the same in m8patch.TESTED', (len(d.BUILDS), sorted(d.BUILDS, key=str) == sorted(
         [('dng', sc, dl, True) for (_, sc, dl) in m8patch.TESTED], key=str)), (4, True))
     for option, screen, dial, meta in d.BUILDS:
@@ -57,7 +59,7 @@ def main():
         res.check(f'{name}: == m8_dngpatch.build_file', out == d.build_file(stock, option, screen, dial, meta)[1],
                   True)
         pieces = (['meta'] if meta else ['dng'] if option == 'dng' else []) + ([screen] if screen else []) + \
-            (['dial iso'] if dial == 'iso' else ['dial'] if dial else [])
+            (['dial red'] if dial == 'red' else ['dial iso'] if dial == 'iso' else ['dial'] if dial else [])
         regions = [r for p in pieces for r in PIECES[p]]
         res.check(f'{name}: pieces\' regions disjoint', len(regions), len(set(regions)))
         spans = [d.REGIONS[r] for r in regions]
@@ -67,12 +69,26 @@ def main():
         res.check(f'{name}: differs from Option 1 only in its pieces\' regions',
                   d.region_violations(option1, out, pos, size, set(regions)), [])
         for p in pieces:
+            if p in d.WAIVED_PIECES:                      # owner's waiver: only the listed words may differ
+                names_w, base_p, allowed, why = d.WAIVED_PIECES[p]
+                regs = sorted(d.regions_of(names_w))
+                res.check(f'{name}: piece {p} has the regions of {base_p}', regs, PIECES[base_p])
+                diff = []
+                for r in regs:
+                    a, b_ = region_bytes(out, r), region_bytes(refs[base_p], r)
+                    lo = d.REGIONS[r][0]
+                    diff += [lo + i for i in range(0, len(a), 4) if a[i:i + 4] != b_[i:i + 4]]
+                res.check(f'{name}: piece {p} == {base_p} ({d.TESTED_PIECES[base_p][1][:8]}) except the '
+                          f'{len(allowed)} waived words ({why})', diff, allowed)
+                continue
             same = [r for r in PIECES[p] if region_bytes(out, r) == region_bytes(refs[p], r)]
             res.check(f'{name}: piece {p} byte-identical to its camera-tested build '
                       f'{d.TESTED_PIECES[p][1][:8]}', same, PIECES[p])
         exact = status.startswith('this exact build tested')
         res.check(f'{name}: status matches the record ({"exact" if exact else "pieces"})',
                   exact, 'flashed and camera-tested' in d.KNOWN_OUTPUTS.get(want, ''))
+        waived = [p for p in pieces if p in d.WAIVED_PIECES]
+        res.check(f'{name}: status names the waived colour change', bool(waived), 'not flashed' in status)
     print(f'{res.ok} passed, {res.bad} failed')
     sys.exit(1 if res.bad else 0)
 

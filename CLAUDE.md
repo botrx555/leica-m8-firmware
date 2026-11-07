@@ -30,6 +30,8 @@ a build may ship when every piece is camera-tested**, pieces byte-identical to t
 A new or changed piece needs its own camera test. **Author's camera: `m8patch.py --info --dial-ev` (v0.9.0) = `dng --meta --info --dial-ev --iso`
 (`796ecbc6…`, since 2026-11-06, camera-tested); roll back to v0.8.0's `--info --dial-ev` (`4382b20c…`).**
 `--dial-ev` = EV + ISO pages since v0.9.0 (piece `dial iso`; first click only opens, UP/DOWN switch pages).
+Since v0.10.0 the offered `--dial-ev` is `--dial-ev --red` (Leica-red highlight; 4 words differ from `dial iso`);
+**owner's decision 2026-11-07: shipped without its own camera test** (`WAIVED_PIECES`); owner will report later.
 Owner's decisions: no histogram / image screens (PLAY has one); INFO = Camera stats (an M10-style
 overview was built and rejected 2026-11-03); stock tone curves stay the default (a built-in MODERN
 curve, old stage 12, was flashed and rolled back 2026-10-27).

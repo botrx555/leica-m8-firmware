@@ -1166,6 +1166,18 @@ owner's dial test (shutter dial A and M, half-press held, dial turned): nothing 
   (A mode), as the SET menu does, so 0x2715 alone applies it (the menu's extra 0x28A8 is not needed).
   Still to report: EXIF ISO of shots at a dial-set ISO / AUTO.
 
+### `--dial-ev --red`: Leica-red highlight (v0.10.0, 2026-11-07, not flashed: owner's waiver)
+
+- Owner chose Leica red over amber from a mockup. `tools/asm/m8_infoeviso_red.s` sets `RED`:
+  highlight 0xE022 (Leica logo red (226, 6, 18) → RGB565 (224, 4, 16)) instead of amber 0xFD20, and
+  white text on the selected ISO cell instead of black. Differs from `EV_ISO_CODE` in 4 words
+  (`RED_WORDS`: 0x2C1A8 `mov r3, #0x40000` → `ldreq r3, =(WHITE | F4)`, colour literals 0x2C1E0,
+  0x2C80C, 0x2C814); symbols identical, so the `ev iso` hooks are reused.
+- **Owner's decision 2026-11-07:** ship it without a separate camera test ("I'm comfortable with
+  it"); recorded in `m8_dngpatch.WAIVED_PIECES`, checked by m8_combotest (only those 4 words differ
+  from the camera-tested `dial iso`). Builds `89fbcc00…` (`--dial-ev`), `4cefacf1…` (`--info --dial-ev`).
+- m8_evtest 260/0 (all ISO checks for both colours; selected cell pixel (224, 4, 16)), combotest 51/0.
+
 ### Combining add-ons (v0.6.0, 2026-11-02)
 
 - **Owner's decision:** a build may ship when every piece in it is camera-tested, not only when the

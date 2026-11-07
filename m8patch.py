@@ -27,7 +27,7 @@ picture-profile picker); their hashes are in CHANGELOG.md. Needs only Python 3 (
 """
 import hashlib, os, sys
 
-VERSION = '0.9.0'                   # project version (CHANGELOG.md), not a Leica firmware version
+VERSION = '0.10.0'                   # project version (CHANGELOG.md), not a Leica firmware version
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, 'tools'))
 from m8_rawpatch import KNOWN_INPUTS
@@ -36,15 +36,16 @@ import m8_dngpatch
 # Status texts: the exact file was flashed and used on a camera, or only its pieces were.
 EXACT = 'this exact build tested on a camera ({})'
 PIECES = 'each piece tested on a camera; this combination tested in the emulator'
+RED = ('each piece tested on a camera, the dial pages in amber; their Leica-red colour (4 words) is not flashed '
+       'yet (owner\'s decision 2026-11-07); this combination tested in the emulator')
 # (firmware, INFO add-on, dial) -> (SHA-256 of the result, status). Only these exact results are
 # written. Pieces: RAW patch + DNG writer with white balance and MakerNote (m8_dngpatch `dng --meta`),
-# INFO Camera stats, dial EV + ISO (since v0.9.0) -- see README "Builds".
+# INFO Camera stats, dial EV + ISO (since v0.9.0; Leica red since v0.10.0) -- see README "Builds".
 TESTED = {
     ('2.014', None, False): ('9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04', PIECES),
     ('2.014', 'info', False): ('624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8', PIECES),
-    ('2.014', None, 'iso'): ('c40539668a39a3dffaaf3d57a5f85d6e17630c4f25bdadae1b2f6e80e2d1762d', PIECES),
-    ('2.014', 'info', 'iso'): ('796ecbc676cd184899126de2b8eb4ceb5eb0b32d4d4cb57ddcf9480f4499ab44',
-                               EXACT.format('2026-11-06')),
+    ('2.014', None, 'red'): ('89fbcc00674f69524b9460fa0e47659c4ff5f422767d3f9d1f4dff3436368f21', RED),
+    ('2.014', 'info', 'red'): ('4cefacf137a8013c69d0400a1393d3667f369fdfa4e601ecb38dd3a55286376b', RED),
 }
 # Built, waiting for a camera test of a new piece: refused until then.
 PENDING = {}
@@ -93,7 +94,7 @@ def main():
         fail(f'"{args[0]}" is gone since v0.8.0: there is one build now (README "Build your firmware file").\n'
              '       Run: python3 m8patch.py path/to/m8-2_014.upd [--info] [--dial-ev]')
     info = 'info' if '--info' in args else None
-    dial = 'iso' if '--dial-ev' in args else False     # m8_dngpatch's EV + ISO version (v0.9.0)
+    dial = 'red' if '--dial-ev' in args else False     # m8_dngpatch's EV + ISO version, Leica red (v0.10.0)
     args = [a for a in args if a not in ('--info', '--dial-ev')]
     if len(args) != 1 or args[0].startswith('-'):
         raise SystemExit(f'm8patch v{VERSION}\n' + __doc__)

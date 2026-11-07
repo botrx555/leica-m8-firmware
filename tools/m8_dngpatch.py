@@ -87,7 +87,7 @@ Safety checks run on every build (the build is refused if one fails):
 Test before flashing: work/venv/bin/python tools/m8_savetest.py --build dng --profiles (any build's flags)
 Copy the output to the card as M8-2_014.UPD (the updater looks for M8.UPD / M8-x_yyy.UPD).
 
-Usage: python3 m8_dngpatch.py stock.upd out.upd raw-menu|dng [--meta] [--info | --profiles] [--dial-ev [--wake | --iso]]
+Usage: python3 m8_dngpatch.py stock.upd out.upd raw-menu|dng [--meta] [--info | --profiles] [--dial-ev [--wake | --iso | --red]]
        python3 m8_dngpatch.py stock.upd out.upd --stage N      (HISTORY or OLD_NUMBERS)
 Needs: capstone (work/venv)
 """
@@ -543,6 +543,59 @@ EV_ISO_CODE_SHA = 'b9140ad88dab3a6d4707632d26824203e9b7787d3d06d0d19220a4599c5bd
 EV_ISO_KEY_ENTRY = 0x2C480                 # ev_key
 EV_ISO_HELD_ENTRY = 0x2C454                # ev_held
 EV_ISO_TIMER_ENTRY = 0x2C608               # ev_timer
+# tools/asm/m8_infoeviso_red.s: the same with the Leica-red highlight (owner's choice 2026-11-07); differs
+# from EV_ISO_CODE only in 4 words (RED_WORDS); entries identical, so the ev iso hooks are reused.
+EV_RED_CODE = bytes.fromhex(
+    '0000a0e31eff2fe17c119fe5001091e5b220d1e174319fe5030052e1b020d101050052e30000a0831eff2f815030a0e3'
+    '921320e01c0080e21eff2fe104e02de50fe0a0e1efffffea000050e3b002d011ff00a003010080e20008a0e12008a0e1'
+    '04f09de410402de90040a0e10fe0a0e1f1ffffea050050e31700008a770054e301008002630054e301004002000050e3'
+    '0000a0b3050050e30500a0c3014040e2e4009fe5000090e50410a0e30fe0a0e1dcf09fe50fe0a0e1d2ffffea000050e3'
+    'b042c011cc009fe5000090e5c8109fe5001091e50fe0a0e1c0f09fe51080bde8f0412de90fe0a0e1d3ffffea0080a0e1'
+    '0040a0e3030054e3030044220400a0316610a0e3900105e00e5085e23460a0338060a0230500a0e10610a0e15c20a0e3'
+    '4030a0e378c09fe5080054e174c09f050fe0a0e13b0000ea6c709fe5047197e7000054e364709f050700a0e10410a0e3'
+    '0fe0a0e158f09fe55c0060e2c00085e0141086e20720a0e148309fe5080054e140309f050fe0a0e11c0000ea014084e2'
+    '060054e3daffff3af081bde830420d00ffff0000d41902001c420d0020420d00085203004529000022e000003cf60e00'
+    '17c902000c9c0900ffff0400000000000000000000000000000000000000000000000000000000000000000000000000'
+    '00000000000000000000a0e31eff2fe110402de910d04de200208de52348a0e108408de50338a0e12338a0e104308de5'
+    '052d60e21e30a0e30fe0a0e120f09fe510d08de21080bde804e02de504d04de200c08de50fe0a0e108f09fe504d08de2'
+    '04f09de4ec960900408a0900000000000000000000000000000000000000000000000000000000000000000000000000'
+    '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+    '000000000000000000000000000000000000000000000000000000000000a0e31eff2fe110402de9004090e554c09fe5'
+    '0000a0e30010a0e3052da0e31930a0e30fe0a0e1cfffffea0800a0e30410a0e334209fe534309fe5030054e130209f05'
+    '30309fe50fe0a0e1b8ffffea0800a0e3da10a0e320209fe520309fe50fe0a0e1b2ffffea1080bde845290000d8c80200'
+    '80c80200eec80200ffff0300f2c802006d6b030000000000000000000000000000000000000000000000000000000000'
+    '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+    '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+    '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+    '0000000000000000000000000000000000000000000000000000000000000000000000000000a0e31eff2fe1630055e3'
+    '770055134cf39f15953b84e28d20d3e5000052e33cf39f15442393e5010012e330f39f15020000ea630055e377005513'
+    '20f39f1503002de9953b84e2b020d3e5000052e31f00001aa00083e20fe0a0e104f39fe5000050e31a00000afc029fe5'
+    '000090e5b200d0e1050050e31500000a6f0c84e26c0080e20110a0e30fe0a0e1dcf29fe5953b84e20120a0e38f20c3e5'
+    '6f0c84e26c0080e20030a0e39930c0e54e0f80e2bc129fe5001080e50110a0e30fe0a0e1b0f29fe5070a84e2a40080e2'
+    '0fe0a0e1010000ea0300bde884f29fe504e02de50cd04de20030a0e300308de504308de508308de5600080e27c129fe5'
+    '7d2ea0e30130a0e30fe0a0e170f29fe50cd08de204f09de4ff1001e2750051e3640051131600000a630051e377005113'
+    '1e00001a10402de90040a0e1002090e540329fe5030052e10200000a0fe0a0e134f29fe5020000ea0100a0e10fe0a0e1'
+    'bbfeffea0400a0e10fe0a0e1dbffffea0400a0e11040bde8002090e57510a0e31cf092e5002090e500129fe500329fe5'
+    '030052e10130a001003080e501402de90fe0a0e1cdffffea0140bde8f1ffffeae0219fe5002080e57310a0e3d8f19fe5'
+    '07ca80e2a4c08ce200309ce5cc219fe5020053e10200000ac4219fe5020053e1c0f19f1504e02de50c00a0e1203090e5'
+    '040013e39c219f15002080150100000a0000a0e304f09de40fe0a0e1e7ffffea0000a0e304f09de4f0402de924d04de2'
+    '48019fe5000090e5b210d0e178219fe5020051e1b010d001050051e34700008a5020a0e3910220e0fe43d0e1120054e3'
+    '4200008a54119fe5842191e750119fe50d00a0e10fe0a0e148f19fe50d00a0e10410a0e30fe0a0e13cf19fe5050d60e2'
+    'a000a0e14e10a0e30d20a0e12c319fe5090054e328319f150fe0a0e1cffeffea0050a0e32270a0e30500a0e1030050e2'
+    'fdffff5a030070e30700a0e19010a0039610a0130e30a0030630a0130220a0e3f0c09fe50fe0a0e1cefeffea015085e2'
+    '0e7087e2130055e3eeffff3a0e00a0e3940000e01f0080e28c10a0e30820a0e31630a0e3a0c09fe5090054e3b8c09f15'
+    '0fe0a0e1bffeffea1c00a0e3a610a0e3a8209fe5a8309fe50fe0a0e1abfeffea9d00a0e3a610a0e398209fe590309fe5'
+    '0fe0a0e1a5feffea450fa0e3a610a0e384209fe578309fe50fe0a0e19ffeffea24d08de2f080bde88c4f0400f0030400'
+    '30420d00e88f050028c80200600304001e27000010bd080080c802005459060028c8020080c80200b8d10e0068180600'
+    '28c8020080c80200643b0400ffff000020a10d001cc90200ec940b000c9c0900ffff040022e00400b294000022e00000'
+    '22c90200b294030025c9020027c902004cd30c0054d30c005cd30c0064d30c00d0a809006c1e0d00b41e0d007ca40900'
+    '6cd30c00ac050600f0a8090060c50200d8ac090068ad09006cad09006003040070d30c0074d30c00fcc2020060c60200'
+    '00000000000000004cd30c0054d30c005cd30c0064d30c00d0a809006c1e0d00b41e0d007ca409006cd30c00ac050600'
+    'f0a8090060c50200d8ac090068ad09006cad09006003040070d30c0074d30c00fcc2020018c102000000000000000000'
+    '4578706f7375726520636f6d70656e736174696f6e0049534f004469616c3a2061646a757374202055502f444e3a2045'
+    '562f49534f20205345543a206f6b004155544f002573204556002d330030002b33000000')
+EV_RED_CODE_SHA = 'ed70c33f33e4187746a10f22306d60116ee26a2263c29d84f5b63aef7f98a9a3'
+RED_WORDS = [0x2C1A8, 0x2C1E0, 0x2C80C, 0x2C814]   # selected-cell text colour load + 3 colour literals
 EVISO_STOCK_SHA = '86c10cd76f0346982c9eaee4411fb9eff9033358dd5d76e8e774f768f385f2bb'
 EV_HELD_ENTRY = 0x2C454                    # ev_held
 EV_TIMER_ENTRY = 0x2C5BC                   # ev_timer
@@ -763,13 +816,13 @@ def ev_blob(code=EV_CODE, sha=EV_CODE_SHA):
     return code + UDF * ((hi - lo - len(code)) // 4)
 
 
-def ev_iso_blob():
-    if hashlib.sha256(EV_ISO_CODE).hexdigest() != EV_ISO_CODE_SHA:
-        raise SystemExit('EV_ISO_CODE does not match its SHA-256')
+def ev_iso_blob(code=EV_ISO_CODE, sha=EV_ISO_CODE_SHA):
+    if hashlib.sha256(code).hexdigest() != sha:
+        raise SystemExit('EV + ISO code does not match its SHA-256')
     lo, hi = REGIONS['eviso']
-    if len(EV_ISO_CODE) > hi - lo:
-        raise SystemExit(f'eviso overflow: {len(EV_ISO_CODE)} > {hi - lo} bytes')
-    return EV_ISO_CODE + UDF * ((hi - lo - len(EV_ISO_CODE)) // 4)
+    if len(code) > hi - lo:
+        raise SystemExit(f'eviso overflow: {len(code)} > {hi - lo} bytes')
+    return code + UDF * ((hi - lo - len(code)) // 4)
 
 
 def b(src, dst):
@@ -815,6 +868,7 @@ def pieces():
         'ev': ('setting', REGIONS['setting'][0], SETTING_STOCK_SHA, ev_blob()),
         'ev wake': ('setting', REGIONS['setting'][0], SETTING_STOCK_SHA, ev_blob(EV_WAKE_CODE, EV_WAKE_CODE_SHA)),
         'ev iso': ('eviso', REGIONS['eviso'][0], EVISO_STOCK_SHA, ev_iso_blob()),
+        'ev red': ('eviso', REGIONS['eviso'][0], EVISO_STOCK_SHA, ev_iso_blob(EV_RED_CODE, EV_RED_CODE_SHA)),
         'ev iso key': ('evkey', 0x44EDC, bytes.fromhex('2a0000ea'), b(0x44EDC, EV_ISO_KEY_ENTRY)),
         'ev iso held': ('evheld', 0x44E9C, bytes.fromhex('3a00001a'), bne(0x44E9C, EV_ISO_HELD_ENTRY)),
         'ev iso timer': ('evtimer', 0xEF2B4, struct.pack('<I', 0x43B64), struct.pack('<I', EV_ISO_TIMER_ENTRY)),
@@ -845,14 +899,18 @@ DIAL_PIECES = ['ev', 'ev key', 'ev held', 'ev timer']
 DIAL_WAKE_PIECES = ['ev wake', 'ev key', 'ev held', 'ev timer']
 # --dial-ev --iso (dial = 'iso'): wake + ISO page; test build, not offered until camera-tested
 DIAL_ISO_PIECES = ['ev iso', 'ev iso key', 'ev iso held', 'ev iso timer']
+# --dial-ev --red (dial = 'red', offered since v0.10.0): DIAL_ISO_PIECES with the Leica-red colours
+DIAL_RED_PIECES = ['ev red', 'ev iso key', 'ev iso held', 'ev iso timer']
 # (option, screen, dial, meta). Every combination m8patch.py has offered: 12 up to v0.6.0, 6 with --meta in v0.7.0
 ALL_BUILDS = ([(o, sc, dl, False) for o in ('raw-menu', 'dng') for sc in (None, 'info', 'profiles') for dl in (False, True)] +
               [('dng', sc, dl, True) for sc in (None, 'info', 'profiles') for dl in (False, True)] +
-              [('dng', sc, 'iso', True) for sc in (None, 'info')])          # v0.9.0: --dial-ev = EV + ISO pages
+              [('dng', sc, 'iso', True) for sc in (None, 'info')] +         # v0.9.0: --dial-ev = EV + ISO pages
+              [('dng', sc, 'red', True) for sc in (None, 'info')])          # v0.10.0: the same in Leica red
 # Offered since 2026-11-06 (owner's decision): one base (raw-menu + dng + --meta), add-ons --info, --dial-ev.
 # --profiles is out until the picker is reworked (work in progress); raw-menu and dng without --meta too.
 # v0.9.0 (2026-11-06): --dial-ev is the EV + ISO version (pieces ev iso*; first click only opens the page).
-BUILDS = [('dng', sc, dl, True) for sc in (None, 'info') for dl in (False, 'iso')]
+# v0.10.0 (2026-11-07): the same, Leica-red highlight (owner's choice; colour change not flashed, WAIVED_PIECES).
+BUILDS = [('dng', sc, dl, True) for sc in (None, 'info') for dl in (False, 'red')]
 # piece -> (pieces, flashed build it was camera-tested in, date)
 TESTED_PIECES = {
     'raw-menu': ([], 'f6589c41a583d1a44fbce77c4acda707640d255acec97a0d2e1ac829c2e70396', '2026-10-19'),
@@ -864,6 +922,12 @@ TESTED_PIECES = {
     'dial iso': (DIAL_ISO_PIECES, '796ecbc676cd184899126de2b8eb4ceb5eb0b32d4d4cb57ddcf9480f4499ab44', '2026-11-06'),
     'meta': (['tiff', 'meta', 'meta code', 'meta hook', 'meta fetch'],
              '4359b04b41dd81761730e79fde3b46a09044e908c55cdc56cd8d8add3288e905', '2026-11-05'),
+}
+# Pieces shipped without their own camera test by the owner's explicit decision: piece -> (pieces, the
+# camera-tested piece it changes, the only addresses allowed to differ from it, reason).
+WAIVED_PIECES = {
+    'dial red': (DIAL_RED_PIECES, 'dial iso', RED_WORDS,
+                 "highlight colour amber -> Leica red only (owner's decision 2026-11-07, no separate camera test)"),
 }
 OLD_NUMBERS = {4: ('dng', None, False), 8: ('dng', 'info', False), 10: ('raw-menu', 'info', False),
                13: ('dng', 'profiles', False), 14: ('raw-menu', 'profiles', False),
@@ -882,12 +946,12 @@ def build_pieces(option, screen=None, dial=False, meta=False):
     if meta and option != 'dng':
         raise SystemExit('--meta needs the dng option')
     base = PLAY_PIECES if meta == 'play' else META_PIECES if meta else OPTION_PIECES[option]
-    return base + SCREEN_PIECES[screen] + (DIAL_ISO_PIECES if dial == 'iso' else DIAL_WAKE_PIECES if dial == 'wake' else DIAL_PIECES if dial else [])
+    return base + SCREEN_PIECES[screen] + (DIAL_RED_PIECES if dial == 'red' else DIAL_ISO_PIECES if dial == 'iso' else DIAL_WAKE_PIECES if dial == 'wake' else DIAL_PIECES if dial else [])
 
 
 def build_name(option, screen=None, dial=False, meta=False):
     return option + (' --play' if meta == 'play' else ' --meta' if meta else '') + \
-        (f' --{screen}' if screen else '') + (' --dial-ev --iso' if dial == 'iso' else ' --dial-ev --wake' if dial == 'wake' else ' --dial-ev' if dial else '')
+        (f' --{screen}' if screen else '') + (' --dial-ev --red' if dial == 'red' else ' --dial-ev --iso' if dial == 'iso' else ' --dial-ev --wake' if dial == 'wake' else ' --dial-ev' if dial else '')
 
 
 def stage_pieces(stage):
@@ -978,6 +1042,12 @@ KNOWN_OUTPUTS = {  # stage builds whose emulator run passed (see FINDINGS)
         '(owner report: pages look as rendered; ISO changed on the page changes the viewfinder shutter speed live)',
     'c40539668a39a3dffaaf3d57a5f85d6e17630c4f25bdadae1b2f6e80e2d1762d':
         'dng --meta --dial-ev --iso (v0.9.0); m8_evtest, m8_combotest; not flashed; every piece camera-tested',
+    '89fbcc00674f69524b9460fa0e47659c4ff5f422767d3f9d1f4dff3436368f21':
+        'dng --meta --dial-ev --red (v0.10.0); m8_evtest, m8_combotest; not flashed; pieces camera-tested, '
+        'red colour waived (owner 2026-11-07)',
+    '4cefacf137a8013c69d0400a1393d3667f369fdfa4e601ecb38dd3a55286376b':
+        'dng --meta --info --dial-ev --red (v0.10.0); m8_evtest, m8_combotest; not flashed; == 796ecbc6 except '
+        'the 4 colour words (owner\'s decision 2026-11-07: no separate camera test)',
     '823ef5c8f64311bacec4c27edd3e011f6afb065b564edb41f5ce5926ef24cb25':
         'stage 20, Option 1 + dial EV; m8_evtest 164/0, m8_combotest, m8_savetest 39/0; not flashed; every piece camera-tested (v0.6.0)',
 }
@@ -1169,13 +1239,13 @@ def main():
                  else f'old stage {stage} = {build_name(*OLD_NUMBERS[stage])}')
     else:
         dial, meta = '--dial-ev' in args, 'play' if '--play' in args else '--meta' in args
-        for flag in ('--wake', '--iso'):
+        for flag in ('--wake', '--iso', '--red'):
             if flag in args:
                 if not dial or dial is not True:
                     raise SystemExit(f'{flag} needs --dial-ev (and not with the other variant)')
                 dial = flag[2:]
         screens = [a[2:] for a in args if a in ('--info', '--profiles')]
-        args = [a for a in args if a not in ('--dial-ev', '--wake', '--iso', '--meta', '--play', '--info', '--profiles')]
+        args = [a for a in args if a not in ('--dial-ev', '--wake', '--iso', '--red', '--meta', '--play', '--info', '--profiles')]
         if len(screens) > 1 or len(args) != 3 or args[2] not in OPTION_PIECES:
             raise SystemExit(__doc__)
         screen = screens[0] if screens else None

@@ -521,7 +521,7 @@ def symbols():
     import subprocess, tempfile
     with tempfile.TemporaryDirectory() as t:
         obj = os.path.join(t, 'o.o')
-        subprocess.run(['clang', *m8_asm.FLAGS, SRC, '-o', obj], check=True)
+        subprocess.run(['clang', *m8_asm.FLAGS, '-I', os.path.dirname(os.path.abspath(SRC)), SRC, '-o', obj], check=True)
         nm = subprocess.run(['xcrun', 'llvm-nm', obj], capture_output=True, text=True, check=True).stdout
     return {n: int(v, 16) for v, t_, n in (l.split() for l in nm.splitlines() if len(l.split()) == 3)
             if t_ in 'tT'}

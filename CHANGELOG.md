@@ -3,6 +3,24 @@
 Versions of this project (not Leica firmware versions). Every build is for Leica M8 firmware **2.014**.
 Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't flash it.
 
+## v0.10.0 — 2026-11-07
+
+- **The dial pages use Leica red** instead of amber: the selected ISO cell (with white text) and the
+  exposure compensation value and marker when not 0.
+- Only the colour changed (four words of the dial code; checked by `m8_combotest`). This colour
+  change has not been flashed on its own (owner's decision); the same code in amber is
+  camera-tested as v0.9.0's `796ecbc6…`. The two builds without `--dial-ev` are unchanged.
+- Developers: `tools/asm/m8_infoeviso_red.s` (sets `RED`), pieces `ev red` + the `ev iso` hooks,
+  `m8_dngpatch … --dial-ev --red`; `m8_dngpatch.WAIVED_PIECES` records the waiver and the words
+  allowed to differ.
+
+| Build | SHA-256 | On a camera |
+|---|---|---|
+| the build | `9b9a489a0decff5bc1a52ba8ff2b4574a608ae7a8fa1bc41fc6bfa9a49c02c04` | pieces |
+| + `--info` | `624448c6190de500028e4c583993cf9047c791504e5f9bc4c45a31b79af42af8` | pieces |
+| + `--dial-ev` | `89fbcc00674f69524b9460fa0e47659c4ff5f422767d3f9d1f4dff3436368f21` | pieces, red not flashed |
+| + `--info --dial-ev` | `4cefacf137a8013c69d0400a1393d3667f369fdfa4e601ecb38dd3a55286376b` | pieces, red not flashed |
+
 ## v0.9.0 — 2026-11-06
 
 - **`--dial-ev` now does ISO too.** The first dial click only opens the exposure compensation page

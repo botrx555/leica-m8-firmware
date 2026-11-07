@@ -57,7 +57,16 @@
     .equ GREY,       0x94B2         @ (150, 150, 150)
     .equ FOOT,       0x6B6D         @ (110, 110, 110)
     .equ BAR,        0x2945         @ (40, 40, 40)
-    .equ AMBER,      0xFD20
+    .ifndef RED
+    .set    RED, 0                  @ 1 = m8_infoeviso_red.s: Leica red highlight (v0.10.0)
+    .endif
+    .if RED
+    .equ HILITE,     0xE022         @ Leica red (226, 6, 18) -> RGB565 (224, 4, 16)
+    .equ HITEXT,     WHITE          @ text on the selected ISO cell
+    .else
+    .equ HILITE,     0xFD20         @ amber (camera-tested in 796ecbc6)
+    .equ HITEXT,     BLACK
+    .endif
     .equ X0,         34             @ EV scale: tick i at X0 + i * DX, i = 0..18
     .equ DX,         14
     .equ YS,         140
@@ -159,7 +168,7 @@ content_iso:                        @ (this)
     mov     r3, #CH
     ldr     ip, =BAR
     cmp     r4, r8
-    ldreq   ip, =AMBER
+    ldreq   ip, =HILITE
     lcall   fill
     ldr     r7, =ISO_TEXT
     ldr     r7, [r7, r4, lsl #2]    @ Leica's menu text
@@ -174,7 +183,7 @@ content_iso:                        @ (this)
     mov     r2, r7
     ldr     r3, =(WHITE | F4)
     cmp     r4, r8
-    ldreq   r3, =(BLACK | F4)
+    ldreq   r3, =(HITEXT | F4)
     lcall   text
     add     r4, r4, #1
     cmp     r4, #6
@@ -420,7 +429,7 @@ content:                            @ (this)
     mov     r2, sp
     ldr     r3, =(WHITE | F4)
     cmp     r4, #9
-    ldrne   r3, =(AMBER | F4)       @ not 0: amber
+    ldrne   r3, =(HILITE | F4)      @ not 0: highlight colour
     lcall   text
     mov     r5, #0                  @ scale: 19 ticks, full stops taller
     mov     r7, #X0
@@ -448,7 +457,7 @@ content:                            @ (this)
     mov     r3, #22
     ldr     ip, =WHITE
     cmp     r4, #9
-    ldrne   ip, =AMBER
+    ldrne   ip, =HILITE
     lcall   fill
     mov     r0, #(X0 - 6)           @ -3, 0, +3 under the scale
     mov     r1, #(YS + 26)
