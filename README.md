@@ -1,5 +1,17 @@
 # leica-m8-firmware
 
+> **This project is finished and no longer maintained (2026-11-08).** The author has sold the camera,
+> so nothing here will be tested on a camera again, and the repository is archived (read-only).
+> - **The last camera-tested version is [v0.9.0](https://github.com/gasdevmco/leica-m8-firmware/releases/tag/v0.9.0).**
+>   v0.10.0 (the current `main`) only changes the dial pages' colour to Leica red; that change
+>   was never flashed. If you want the safest build, use v0.9.0.
+> - Open questions at the end are listed under [Known limitations](#known-limitations) and in the
+>   closed issues ([#3](https://github.com/gasdevmco/leica-m8-firmware/issues/3),
+>   [#5](https://github.com/gasdevmco/leica-m8-firmware/issues/5),
+>   [#7](https://github.com/gasdevmco/leica-m8-firmware/issues/7)); `docs/FINDINGS.md` holds
+>   every address and result, so anyone with an M8 can carry on from there.
+> - Forks are welcome under the [license](#license). Never add Leica firmware files to a fork.
+
 Tools for patching the firmware of the **Leica M8** so it:
 
 1. **Keeps "JPG fine+RAW" selected.** This hidden service-mode setting saves the sensor's full 14-bit
@@ -197,8 +209,8 @@ Builds marked *exact* were also flashed as that exact file.
 with white balance in `4359b04b…` (2026-11-05/06), Camera stats in `32e6854e…` (2026-10-23), the
 dial (EV + ISO) in `796ecbc6…` (2026-11-06), see [CHANGELOG](CHANGELOG.md). *Red not flashed*: since
 v0.10.0 the dial pages use Leica red instead of amber; that colour change (four words, nothing else)
-hasn't been flashed on its own yet. The author's camera runs the amber version (`796ecbc6…`). If you flash one of these builds,
-please report how it went (add-ons, SHA-256) in an issue.
+hasn't been flashed on its own yet. The author's camera runs the amber version (`796ecbc6…`). The repository is archived, so
+reports can no longer be filed here.
 
 Earlier versions offered more combinations (Option 1 without the DNG writer, the DNG writer without
 white balance, the picture-profile picker). Their hashes stay in the [CHANGELOG](CHANGELOG.md), so a

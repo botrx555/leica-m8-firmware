@@ -3,6 +3,12 @@
 Versions of this project (not Leica firmware versions). Every build is for Leica M8 firmware **2.014**.
 Hashes are the SHA-256 of the file `m8patch.py` writes; if yours differs, don't flash it.
 
+## End of project — 2026-11-08
+
+The author sold the camera; the project is finished and the repository archived. **v0.9.0 is the
+last version tested on a camera**; v0.10.0's red dial colour was never flashed. Nothing changed in
+the builds.
+
 ## v0.10.0 — 2026-11-07
 
 - **The dial pages use Leica red** instead of amber: the selected ISO cell (with white text) and the
